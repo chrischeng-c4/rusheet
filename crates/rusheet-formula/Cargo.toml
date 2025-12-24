@@ -1,0 +1,12 @@
+[package]
+name = "rusheet-formula"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Formula parsing and evaluation engine for RuSheet"
+
+[dependencies]
+rusheet-core = { path = "../rusheet-core" }
+serde.workspace = true
+thiserror.workspace = true
