@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "crates/rusheet-core",
+    "crates/rusheet-formula",
+    "crates/rusheet-wasm",
+    "crates/rusheet-history",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Chris Cheng <chris.cheng@shopee.com>"]
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"

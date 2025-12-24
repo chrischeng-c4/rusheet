@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RuSheet - Spreadsheet</title>
+    <link rel="stylesheet" href="/src/styles/main.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="toolbar"></header>
+      <div id="formula-bar">
+        <span id="cell-address">A1</span>
+        <input type="text" id="formula-input" placeholder="Enter value or formula..." />
+      </div>
+      <main id="spreadsheet-container">
+        <canvas id="spreadsheet-canvas"></canvas>
+      </main>
+      <footer id="sheet-tabs">
+        <div class="sheet-tab active" data-index="0">Sheet1</div>
+        <button id="add-sheet-btn">+</button>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
