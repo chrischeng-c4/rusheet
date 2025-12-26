@@ -1,0 +1,227 @@
+// Import CSS styles
+import './styles/main.css';
+
+// Import core modules
+import * as WasmBridge from './core/WasmBridge';
+import GridRenderer from './canvas/GridRenderer';
+import InputController from './ui/InputController';
+import CellEditor from './ui/CellEditor';
+
+/**
+ * Convert column index to Excel-style letter notation
+ * 0 -> A, 1 -> B, ..., 25 -> Z, 26 -> AA, etc.
+ */
+function colToLetter(col: number): string {
+  let result = '';
+  let num = col;
+  while (num >= 0) {
+    result = String.fromCharCode(65 + (num % 26)) + result;
+    num = Math.floor(num / 26) - 1;
+    if (num < 0) break;
+  }
+  return result;
+}
+
+/**
+ * Main application entry point
+ */
+async function main(): Promise<void> {
+  try {
+    console.log('[RuSheet] Initializing application...');
+
+    // Step 1: Initialize WASM module
+    console.log('[RuSheet] Loading WASM module...');
+    await WasmBridge.initWasm();
+    console.log('[RuSheet] WASM module loaded successfully');
+
+    // Step 2: Get DOM elements
+    console.log('[RuSheet] Getting DOM elements...');
+    const canvas = document.getElementById('spreadsheet-canvas') as HTMLCanvasElement;
+    const formulaInput = document.getElementById('formula-input') as HTMLInputElement;
+    const cellAddress = document.getElementById('cell-address') as HTMLSpanElement;
+    const addSheetBtn = document.getElementById('add-sheet-btn') as HTMLButtonElement;
+    const container = document.getElementById('spreadsheet-container') as HTMLElement;
+
+    if (!canvas || !formulaInput || !cellAddress || !addSheetBtn || !container) {
+      throw new Error('Failed to find required DOM elements');
+    }
+    console.log('[RuSheet] DOM elements found');
+
+    // Step 3: Create GridRenderer
+    console.log('[RuSheet] Creating grid renderer...');
+    const renderer = new GridRenderer(canvas);
+
+    // Step 4: Create CellEditor
+    console.log('[RuSheet] Creating cell editor...');
+    const cellEditor = new CellEditor(container, renderer, WasmBridge, formulaInput);
+
+    // Step 5: Create InputController with edit mode callback
+    console.log('[RuSheet] Creating input controller...');
+    const editModeCallback = (row: number, col: number) => {
+      cellEditor.activate(row, col);
+    };
+    // InputController sets up event listeners in constructor
+    new InputController(canvas, renderer, editModeCallback);
+
+    // Step 6: Set up window resize handler
+    console.log('[RuSheet] Setting up resize handler...');
+    const resizeCanvas = () => {
+      const containerRect = container.getBoundingClientRect();
+      const width = containerRect.width;
+      const height = containerRect.height;
+
+      // Set canvas size to fill container
+      canvas.width = width;
+      canvas.height = height;
+
+      // Update renderer viewport and re-render
+      renderer.updateViewportSize();
+      renderer.render();
+
+      // Update cell editor position if editing
+      cellEditor.updatePosition();
+    };
+
+    // Initial resize
+    resizeCanvas();
+
+    // Listen for window resize events
+    window.addEventListener('resize', resizeCanvas);
+
+    // Step 7: Update cell address display when selection changes
+    console.log('[RuSheet] Setting up cell selection tracking...');
+
+    // Create a render wrapper to update cell address
+    const originalRender = renderer.render.bind(renderer);
+    renderer.render = function() {
+      originalRender();
+      const activeCell = renderer.getActiveCell();
+      cellAddress.textContent = `${colToLetter(activeCell.col)}${activeCell.row + 1}`;
+    };
+
+    // Set callback for cell editor to update address when moving cells
+    cellEditor.setCellChangeCallback((row: number, col: number) => {
+      cellAddress.textContent = `${colToLetter(col)}${row + 1}`;
+      renderer.render();
+    });
+
+    // Step 8: Set up add sheet button
+    console.log('[RuSheet] Setting up sheet management...');
+    let sheetCounter = 2;
+    addSheetBtn.addEventListener('click', () => {
+      const sheetName = `Sheet${sheetCounter}`;
+      const newIndex = WasmBridge.addSheet(sheetName);
+      console.log(`[RuSheet] Added new sheet: ${sheetName} at index ${newIndex}`);
+
+      // Create new sheet tab
+      const sheetTab = document.createElement('div');
+      sheetTab.className = 'sheet-tab';
+      sheetTab.setAttribute('data-index', String(newIndex));
+      sheetTab.textContent = sheetName;
+
+      // Remove active class from all tabs
+      document.querySelectorAll('.sheet-tab').forEach(tab => tab.classList.remove('active'));
+
+      // Add active class to new tab
+      sheetTab.classList.add('active');
+
+      // Insert before add button
+      addSheetBtn.parentElement?.insertBefore(sheetTab, addSheetBtn);
+
+      // Set as active sheet
+      WasmBridge.setActiveSheet(newIndex);
+
+      sheetCounter++;
+      renderer.render();
+    });
+
+    // Set up sheet tab click handlers
+    document.getElementById('sheet-tabs')?.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      if (target.classList.contains('sheet-tab')) {
+        const index = parseInt(target.getAttribute('data-index') || '0', 10);
+
+        // Remove active class from all tabs
+        document.querySelectorAll('.sheet-tab').forEach(tab => tab.classList.remove('active'));
+
+        // Add active class to clicked tab
+        target.classList.add('active');
+
+        // Set active sheet in WASM
+        WasmBridge.setActiveSheet(index);
+
+        console.log(`[RuSheet] Switched to sheet index ${index}`);
+        renderer.render();
+      }
+    });
+
+    // Step 9: Add test data to demonstrate functionality
+    console.log('[RuSheet] Adding test data...');
+
+    // Add header row
+    WasmBridge.setCellValue(0, 0, 'Product');
+    WasmBridge.setCellValue(0, 1, 'Quantity');
+    WasmBridge.setCellValue(0, 2, 'Price');
+    WasmBridge.setCellValue(0, 3, 'Total');
+
+    // Add data rows
+    WasmBridge.setCellValue(1, 0, 'Apples');
+    WasmBridge.setCellValue(1, 1, '10');
+    WasmBridge.setCellValue(1, 2, '1.5');
+    WasmBridge.setCellValue(1, 3, '=B2*C2');
+
+    WasmBridge.setCellValue(2, 0, 'Oranges');
+    WasmBridge.setCellValue(2, 1, '15');
+    WasmBridge.setCellValue(2, 2, '2.0');
+    WasmBridge.setCellValue(2, 3, '=B3*C3');
+
+    WasmBridge.setCellValue(3, 0, 'Bananas');
+    WasmBridge.setCellValue(3, 1, '20');
+    WasmBridge.setCellValue(3, 2, '0.75');
+    WasmBridge.setCellValue(3, 3, '=B4*C4');
+
+    // Add summary row
+    WasmBridge.setCellValue(4, 0, 'Total:');
+    WasmBridge.setCellValue(4, 3, '=SUM(D2:D4)');
+
+    // Format header row
+    WasmBridge.setRangeFormat(0, 0, 0, 3, {
+      bold: true,
+      background_color: '#f0f0f0',
+    });
+
+    // Format summary row
+    WasmBridge.setRangeFormat(4, 0, 4, 3, {
+      bold: true,
+    });
+
+    console.log('[RuSheet] Test data added');
+
+    // Step 10: Initial render
+    console.log('[RuSheet] Performing initial render...');
+    renderer.render();
+
+    console.log('[RuSheet] Application initialized successfully!');
+    console.log('[RuSheet] Ready to use');
+
+  } catch (error) {
+    console.error('[RuSheet] Initialization failed:', error);
+
+    // Display error message to user
+    const app = document.getElementById('app');
+    if (app) {
+      app.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; font-family: sans-serif;">
+          <h1 style="color: #d32f2f;">Failed to initialize RuSheet</h1>
+          <p style="color: #666; margin-top: 16px;">${error instanceof Error ? error.message : String(error)}</p>
+          <p style="color: #999; margin-top: 8px; font-size: 12px;">Check the console for more details.</p>
+        </div>
+      `;
+    }
+
+    throw error;
+  }
+}
+
+// Start the application
+main();
