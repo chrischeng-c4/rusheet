@@ -73,3 +73,29 @@ graph TD
 1.  **Unidirectional Updates**: The UI never modifies the core state directly. It requests changes via the `WasmBridge`.
 2.  **Command-Based Mutation**: All changes go through the `History` system to guarantee undo capability.
 3.  **Lazy Evaluation**: Formulas are parsed and stored, but typically re-evaluated only when dependencies change (triggered by the `DependencyGraph`).
+
+---
+
+## Detailed Specifications
+
+For in-depth technical specifications, see the following documents:
+
+### Core Architecture
+- **[FSM Specification](./fsm.md)** - Cell lifecycle and history stack state machines
+- **[Data Flow](./flowchart.md)** - Critical data flow diagrams and sequence charts
+
+### Rendering & Performance
+- **[Rendering Engine](./rendering-engine.md)** - Canvas/DOM hybrid model, virtual scrolling, spatial indexing
+- **[Performance](./performance.md)** - 60 FPS targets, optimization strategies, profiling techniques
+
+### Data Layer
+- **[Data Structures](./data-structures.md)** - Sparse matrix storage, gap buffers, CRDT integration
+- **[Formula Engine](./formula-engine.md)** - AST parsing, dependency graph, topological sort
+
+### User Experience
+- **[User Experience](./user-experience.md)** - Selection model, fill handle, navigation, undo/redo
+- **[Keyboard Shortcuts](./keyboard-shortcuts.md)** - Complete shortcut reference and implementation
+
+### Advanced Features
+- **[Advanced Features](./advanced-features.md)** - Pivot tables, conditional formatting, charts
+- **[WASM Integration](./wasm-integration.md)** - JS/Rust bridge, shared memory, serialization
