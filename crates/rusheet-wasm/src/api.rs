@@ -463,6 +463,35 @@ impl SpreadsheetEngine {
             self.recalculate_cell(coord.row, coord.col);
         }
     }
+
+    /// Get total dimensions of the spreadsheet
+    #[wasm_bindgen(js_name = getDimensions)]
+    pub fn get_dimensions(&self) -> String {
+        let sheet = self.workbook.active_sheet();
+        
+        // Use a reasonable limit for scrollable area for now
+        let max_rows = 2000;
+        let max_cols = 100;
+        
+        let width = sheet.col_x_position(max_cols);
+        let height = sheet.row_y_position(max_rows);
+
+        serde_json::to_string(&serde_json::json!({
+            "width": width,
+            "height": height,
+            "rows": max_rows,
+            "cols": max_cols
+        })).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// Get cell coordinates from pixel coordinates
+    #[wasm_bindgen(js_name = getCellFromPixel)]
+    pub fn get_cell_from_pixel(&self, x: f64, y: f64) -> Vec<u32> {
+        let sheet = self.workbook.active_sheet();
+        let row = sheet.row_at_y(y);
+        let col = sheet.col_at_x(x);
+        vec![row, col]
+    }
 }
 
 impl Default for SpreadsheetEngine {

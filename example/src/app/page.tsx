@@ -1,4 +1,4 @@
-import Spreadsheet from '@/components/Spreadsheet';
+import Grid from '@/components/grid/Grid';
 
 export default function Home() {
   return (
@@ -7,7 +7,7 @@ export default function Home() {
         <h1 className="text-lg font-semibold">RuSheet - Rust WASM Spreadsheet</h1>
       </header>
       <div className="flex-1">
-        <Spreadsheet />
+        <Grid />
       </div>
     </main>
   );

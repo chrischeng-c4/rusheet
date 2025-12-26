@@ -1,60 +1,81 @@
-# Rusheet Development Roadmap
+# Rusheet Architectural Roadmap
 
-This document outlines the progressive development plan to build a fully functional spreadsheet application.
+This document outlines the roadmap for upgrading `rusheet` to a high-performance, industry-standard spreadsheet engine.
 
-## Phase 1: Frontend Bootstrap & Basic Interaction (Current Focus)
-**Goal:** Establish a working UI where users can select cells, enter values, and see them rendered.
+## 1. Core Architecture (Rust)
 
-- [ ] **Task 1.1: Application Entry Point (`src/main.ts`)**
-    - Initialize WASM.
-    - Setup Event Listeners.
-    - Start the Render Loop.
-- [ ] **Task 1.2: Canvas Grid Renderer (`src/canvas/GridRenderer.ts`)**
-    - Draw grid lines, headers, and cell content.
-    - Handle scrolling (offset calculations).
-- [ ] **Task 1.3: Input Controller (`src/ui/InputController.ts`)**
-    - Handle Mouse Clicks (Selection).
-    - Handle Keyboard Navigation (Arrow keys).
-    - Handle Double-Click (Enter Edit Mode).
-- [ ] **Task 1.4: Cell Editor (`src/ui/CellEditor.ts`)**
-    - Overlay an `<input>` element over the active cell.
-    - Commit changes to WASM on Enter/Blur.
-- [ ] **Task 1.5: UI Components Sync**
-    - Sync Formula Bar with active cell.
-    - Sync Sheet Tabs with active sheet.
+### Current Status
+*   ✅ **Sparse Matrix:** Implemented `ChunkedGrid` (HashMap of 16x16 blocks).
+*   ✅ **Spatial Index:** Implemented `SpatialIndex` using `FenwickTree` for O(log N) row/col lookups.
+*   ✅ **Basic State:** `Sheet` struct holds data and dimensions.
+*   ✅ **Hit Testing API:** `getCellFromPixel` exposed to WASM.
+*   ✅ **Dimensions API:** `getDimensions` exposed to WASM.
 
-## Phase 2: Formula Engine Expansion
-**Goal:** Support a standard set of spreadsheet functions.
+### Gaps & Tasks
+*   [ ] **Command Pattern:** Ensure all state mutations (edits, formatting, resizing) go through a uniform `Command` enum that supports Undo/Redo.
+*   [ ] **Dependency Graph:** Verify `rusheet-formula` handles DAGs efficiently for recalculation.
+*   [ ] **Dirty Rectangles:** The `Sheet` or `Engine` needs to return a list of "Dirty Rects" after a mutation, rather than requiring a full re-render.
 
-- [ ] **Task 2.1: Logical Functions**
-    - Ensure `IF`, `AND`, `OR`, `NOT`, `IFERROR` are implemented.
-- [ ] **Task 2.2: Lookup Functions**
-    - Implement `VLOOKUP`, `HLOOKUP`, `MATCH`, `INDEX`.
-- [ ] **Task 2.3: Date & Time Functions**
-    - Implement `TODAY`, `NOW`, `DATE`, `YEAR`, `MONTH`, `DAY`.
-- [ ] **Task 2.4: Text Functions**
-    - Implement `CONCATENATE` (or `&`), `LEFT`, `RIGHT`, `MID`, `LEN`, `TRIM`.
+## 2. Rendering Engine (TypeScript/WASM)
 
-## Phase 3: Formatting & Advanced UI
-**Goal:** Allow users to style their sheets.
+### Current Status
+*   ✅ **Modular Architecture:** Split into `GridRenderer`, `GridController`, `useGrid`, and `Grid`.
+*   ✅ **Hybrid Rendering:** Canvas for Grid, DOM for Editor Overlay and Scrollbars.
+*   ✅ **Virtual Scroll:** Implemented `onScroll` sync between DOM Scroller and Canvas Controller.
+*   ⚠️ **Direct Canvas API:** Rendering commands are issued one-by-one from JS. Need `getViewportData` optimization.
 
-- [ ] **Task 3.1: Toolbar Implementation**
-    - Connect Bold/Italic/Underline buttons to WASM.
-    - Connect Color pickers.
-    - Connect Alignment buttons.
-- [ ] **Task 3.2: Range Operations**
-    - Multi-cell selection rendering.
-    - Delete Key clears range.
-    - Copy/Paste support.
-- [ ] **Task 3.3: Row/Column Resizing**
-    - Drag handles on headers.
+### Tasks
+*   [ ] **WASM Bridge Optimization:** Implement `getViewportData(rect)` that returns a serialized buffer or FlatBuffer.
+*   [ ] **Render Loop:** Move from `useEffect` to an explicit `requestAnimationFrame` loop driven by "Dirty" flags.
+*   [ ] **Border Rendering:** Implement rendering of cell borders (Top/Bottom/Left/Right).
 
-## Phase 4: Persistence & Polish
-**Goal:** Save work and optimize performance.
+## 3. Interaction & UX (Goal: 60-70% Google Sheets)
 
-- [ ] **Task 4.1: Persistence**
-    - Save Workbook to LocalStorage (auto-save).
-    - Export/Import JSON files.
-- [ ] **Task 4.2: Optimization**
-    - Virtual scrolling refinement.
-    - Canvas rendering optimization (dirty rects).
+### Current Status
+*   ✅ **Hit Testing:** O(log N) hit testing using `SpatialIndex`.
+*   ✅ **Basic Selection:** Single cell selection.
+*   ✅ **Basic Navigation:** Arrow keys.
+*   ✅ **Scrolling:** Virtualized scrolling with native feel.
+
+### Tasks (Priority Order)
+
+#### 3.1 Selection & Range
+*   [ ] **Range Selection:** Implement drag-to-select logic in `GridController`.
+*   [ ] **Shift+Select:** Expand selection range.
+*   [ ] **Visual Feedback:** Draw blue selection overlay in `GridRenderer`.
+
+#### 3.2 Resizing
+*   [ ] **Header Interaction:** Detect hover over row/column separators.
+*   [ ] **Drag Logic:** Implement resizing interaction.
+*   [ ] **API:** Connect to `setRowHeight` / `setColWidth`.
+
+#### 3.3 Sheet Management
+*   [ ] **Tab Bar UI:** React component for Sheet Tabs.
+*   [ ] **Operations:** Add, Rename, Delete, Switch Sheet.
+
+#### 3.4 Context Menus
+*   [ ] **Header Menu:** Right-click on Row/Col headers (Insert, Delete, Hide).
+*   [ ] **Cell Menu:** Cut, Copy, Paste, Format.
+
+#### 3.5 Clipboard
+*   [ ] **Internal Serializer:** Implement TSV and HTML export in `SpreadsheetEngine`.
+*   [ ] **Frontend Handling:** `Ctrl+C`/`Ctrl+V` listeners in `GridController`.
+*   [ ] **Paste Logic:** Parser for TSV/HTML to insert data into `Sheet`.
+
+#### 3.6 Persistence
+*   [ ] **JSON Schema:** Define stable JSON format for `Workbook`.
+*   [ ] **Import/Export:** Add "Save" and "Load" buttons to Toolbar.
+*   [ ] **Auto-save:** Implement debounce save to `localStorage`.
+
+## 4. Testing Strategy
+
+### Core Logic (Rust)
+*   **Unit Tests:** Continue strict testing of `ChunkedGrid` and `SpatialIndex`.
+*   **Integration Tests:** Test the `Command` stack (Undo/Redo) and Formula Engine.
+
+### Visual/Canvas (TypeScript)
+*   **Interaction Tests (Vitest + Mock Canvas):**
+    *   Mock the `CanvasRenderingContext2D`.
+    *   Assert that `renderer.draw()` calls `ctx.fillRect` with correct coordinates.
+*   **E2E (Playwright):**
+    *   "Golden Image" comparison for pixel-perfect rendering checks.
