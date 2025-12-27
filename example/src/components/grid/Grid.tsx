@@ -241,7 +241,7 @@ export default function Grid() {
          </span>
          <input
             ref={formulaBarRef}
-            className="flex-1 text-sm border px-2 py-1 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="flex-1 text-sm text-gray-900 border px-2 py-1 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
             value={isEditing ? editValue : formulaBarValue}
             onChange={(e) => setEditValue(e.target.value)}
             onFocus={handleFormulaBarFocus}
