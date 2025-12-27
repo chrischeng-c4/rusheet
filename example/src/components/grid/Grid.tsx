@@ -49,11 +49,48 @@ export default function Grid() {
 
   // Sync Toolbar State
   React.useEffect(() => {
-    if (engine) {
+    if (engine && activeCell) {
+        // Update undo/redo state
         setCanUndo(engine.canUndo());
         setCanRedo(engine.canRedo());
-        // Fetch format for active cell
-        // ... (Similar logic to previous Spreadsheet.tsx)
+
+        // Fetch and sync format for active cell
+        try {
+          const cellData = engine.getCellData(activeCell.row, activeCell.col);
+
+          if (cellData) {
+            // Handle both raw objects and JSON strings
+            const data = typeof cellData === 'string' ? JSON.parse(cellData) : cellData;
+
+            // Build format object with defaults
+            const newFormat: CellFormat = {
+              bold: data.format?.bold ?? false,
+              italic: data.format?.italic ?? false,
+              underline: data.format?.underline ?? false,
+              fontSize: data.format?.fontSize,
+              textColor: data.format?.textColor,
+              backgroundColor: data.format?.backgroundColor,
+              horizontalAlign: data.format?.horizontalAlign,
+              verticalAlign: data.format?.verticalAlign,
+            };
+
+            setCurrentFormat(newFormat);
+          } else {
+            // Empty cell: reset to defaults
+            setCurrentFormat({
+              bold: false,
+              italic: false,
+              underline: false,
+            });
+          }
+        } catch (e) {
+          console.warn('[Grid] Failed to sync cell format from engine:', e);
+          setCurrentFormat({
+            bold: false,
+            italic: false,
+            underline: false,
+          });
+        }
     }
   }, [activeCell, engine]);
 
