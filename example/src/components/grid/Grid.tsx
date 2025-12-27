@@ -2,13 +2,14 @@
 
 import React, { KeyboardEvent } from 'react';
 import { useGrid } from './hooks/useGrid';
-import Toolbar, { CellFormat } from '../../Toolbar'; // Re-use existing Toolbar
+import Toolbar, { CellFormat } from '../Toolbar'; // Re-use existing Toolbar
 import { defaultTheme } from './types';
 
 export default function Grid() {
   const {
     canvasRef,
     containerRef,
+    scrollerRef,
     controller,
     activeCell,
     isEditing,
@@ -20,7 +21,8 @@ export default function Grid() {
     scrollCallbackRef
   } = useGrid();
 
-  const scrollerRef = React.useRef<HTMLDivElement>(null);
+  const formulaBarRef = React.useRef<HTMLInputElement>(null);
+  const [formulaBarValue, setFormulaBarValue] = React.useState('');
 
   // Sync Controller Scroll -> DOM Scroll
   React.useEffect(() => {
@@ -55,12 +57,97 @@ export default function Grid() {
     }
   }, [activeCell, engine]);
 
+  // Sync formula bar with active cell (when NOT editing)
+  React.useEffect(() => {
+    if (!isEditing && engine && activeCell) {
+      try {
+        const cellData = engine.getCellData(activeCell.row, activeCell.col);
+        if (cellData) {
+          const data = typeof cellData === 'string' ? JSON.parse(cellData) : cellData;
+          // Show formula if present, otherwise show display value
+          const content = data.formula || data.displayValue || '';
+          setFormulaBarValue(content);
+        } else {
+          setFormulaBarValue('');
+        }
+      } catch (e) {
+        console.warn('[Grid] Failed to get cell data for formula bar:', e);
+        setFormulaBarValue('');
+      }
+    }
+  }, [activeCell, isEditing, engine]);
+
+  // Auto-focus formula bar when editing starts
+  React.useEffect(() => {
+    if (isEditing && formulaBarRef.current) {
+      formulaBarRef.current.focus();
+      formulaBarRef.current.setSelectionRange(
+        formulaBarRef.current.value.length,
+        formulaBarRef.current.value.length
+      );
+    }
+  }, [isEditing]);
+
+  // Handle formula bar focus - enter edit mode
+  const handleFormulaBarFocus = () => {
+    if (!isEditing && engine) {
+      try {
+        const cellData = engine.getCellData(activeCell.row, activeCell.col);
+        let value = '';
+        if (cellData) {
+          const data = typeof cellData === 'string' ? JSON.parse(cellData) : cellData;
+          value = data.formula || data.displayValue || '';
+        }
+        setEditValue(value);
+        setIsEditing(true);
+      } catch (e) {
+        console.warn('[Grid] Failed to start editing from formula bar:', e);
+        setEditValue('');
+        setIsEditing(true);
+      }
+    }
+  };
+
+  // Handle formula bar keyboard shortcuts
+  const handleFormulaBarKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (engine && controller) {
+        console.log('[Grid] Setting cell value from formula bar:', activeCell.row, activeCell.col, editValue);
+        engine.setCellValue(activeCell.row, activeCell.col, editValue);
+        controller.render();
+      }
+      setIsEditing(false);
+      // Move down after Enter (Google Sheets behavior)
+      if (controller) {
+        const newRow = Math.min(activeCell.row + 1, 1999); // maxRows - 1
+        controller.setActiveCell(newRow, activeCell.col);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsEditing(false);
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // If user starts typing when NOT editing, start editing with that character
+    if (!isEditing && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      setEditValue(e.key);
+      setIsEditing(true);
+      setTimeout(() => formulaBarRef.current?.focus(), 0);
+      return;
+    }
+
     if (isEditing) {
         if (e.key === 'Enter') {
-            if (engine) {
+            if (engine && controller) {
+                console.log('[Grid] Setting cell value:', activeCell.row, activeCell.col, editValue);
                 engine.setCellValue(activeCell.row, activeCell.col, editValue);
-                controller?.render();
+                controller.render();
+                console.log('[Grid] Cell value set and render called');
+            } else {
+                console.warn('[Grid] Cannot set cell value - engine or controller is null');
             }
             setIsEditing(false);
             controller?.handleKeyDown(e.nativeEvent); // Move selection
@@ -72,21 +159,34 @@ export default function Grid() {
 
     // Pass to controller
     controller?.handleKeyDown(e.nativeEvent);
+    e.stopPropagation(); // Prevent bubbling to avoid double-processing
   };
 
   const handleFormatChange = (fmt: Partial<CellFormat>) => {
-      if (!engine) return;
-      // Convert and apply format
+      if (!engine || !controller) {
+          console.warn('[Grid] Cannot change format - engine or controller is null');
+          return;
+      }
+
+      // If currently editing, commit the value first
+      if (isEditing && editValue) {
+          console.log('[Grid] Committing edit before format change');
+          engine.setCellValue(activeCell.row, activeCell.col, editValue);
+          setIsEditing(false);
+      }
+
+      // Convert and apply format (use camelCase for WASM serialization)
       const apiFormat: any = {};
       if (fmt.bold !== undefined) apiFormat.bold = fmt.bold;
       if (fmt.italic !== undefined) apiFormat.italic = fmt.italic;
       if (fmt.underline !== undefined) apiFormat.underline = fmt.underline;
-      if (fmt.textColor !== undefined) apiFormat.text_color = fmt.textColor;
-      if (fmt.backgroundColor !== undefined) apiFormat.background_color = fmt.backgroundColor;
-      if (fmt.horizontalAlign !== undefined) apiFormat.horizontal_align = fmt.horizontalAlign;
-      
+      if (fmt.textColor !== undefined) apiFormat.textColor = fmt.textColor;
+      if (fmt.backgroundColor !== undefined) apiFormat.backgroundColor = fmt.backgroundColor;
+      if (fmt.horizontalAlign !== undefined) apiFormat.horizontalAlign = fmt.horizontalAlign;
+
+      console.log('[Grid] Setting cell format:', activeCell.row, activeCell.col, apiFormat);
       engine.setCellFormat(activeCell.row, activeCell.col, JSON.stringify(apiFormat));
-      controller?.render();
+      controller.render();
   };
 
   // Render Editor Overlay
@@ -101,9 +201,8 @@ export default function Grid() {
           <textarea
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
-            onKeyDown={handleKeyDown}
             autoFocus
-            className="absolute z-10 border-2 border-blue-500 p-1 text-sm resize-none focus:outline-none"
+            className="absolute z-20 border-2 border-blue-500 p-1 text-sm resize-none focus:outline-none"
             style={{
                 left: defaultTheme.headerWidth + activeCell.col * defaultTheme.defaultColWidth - scrollX, 
                 top: defaultTheme.headerHeight + activeCell.row * defaultTheme.defaultRowHeight - scrollY,
@@ -116,9 +215,19 @@ export default function Grid() {
 
   return (
     <div className="flex flex-col h-full w-full bg-white">
-      <Toolbar 
-        onUndo={() => { engine?.undo(); controller?.render(); }}
-        onRedo={() => { engine?.redo(); controller?.render(); }}
+      <Toolbar
+        onUndo={() => {
+          engine?.undo();
+          controller?.render();
+          setCanUndo(engine?.canUndo() ?? false);
+          setCanRedo(engine?.canRedo() ?? false);
+        }}
+        onRedo={() => {
+          engine?.redo();
+          controller?.render();
+          setCanUndo(engine?.canUndo() ?? false);
+          setCanRedo(engine?.canRedo() ?? false);
+        }}
         canUndo={canUndo}
         canRedo={canRedo}
         onFormatChange={handleFormatChange}
@@ -127,14 +236,17 @@ export default function Grid() {
       
       {/* Formula Bar */}
       <div className="flex items-center h-8 border-b border-gray-300 bg-gray-50 px-2 gap-2">
-         <span className="text-xs text-gray-500">
+         <span className="text-xs text-gray-500 font-semibold min-w-[40px]">
             {String.fromCharCode(65 + activeCell.col)}{activeCell.row + 1}
          </span>
-         <input 
-            className="flex-1 text-sm border px-1"
-            value={isEditing ? editValue : ''}
+         <input
+            ref={formulaBarRef}
+            className="flex-1 text-sm border px-2 py-1 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            value={isEditing ? editValue : formulaBarValue}
             onChange={(e) => setEditValue(e.target.value)}
-            placeholder="Formula..."
+            onFocus={handleFormulaBarFocus}
+            onKeyDown={handleFormulaBarKeyDown}
+            placeholder="Enter value or formula..."
          />
       </div>
 
@@ -144,12 +256,12 @@ export default function Grid() {
         tabIndex={0}
         onKeyDown={handleKeyDown}
       >
-        <canvas ref={canvasRef} className="absolute inset-0 block pointer-events-none" />
+        <canvas ref={canvasRef} className="absolute inset-0 block" />
         
         {/* Virtual Scroller (The Interaction Layer) */}
-        <div 
+        <div
             ref={scrollerRef}
-            className="absolute inset-0 overflow-auto"
+            className="absolute inset-0 overflow-auto pointer-events-auto"
             onScroll={handleScroll}
         >
             <div style={{ 
