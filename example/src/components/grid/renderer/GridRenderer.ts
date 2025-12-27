@@ -104,7 +104,7 @@ export class GridRenderer {
           const cellDataRaw = this.engine.getCellData(row, col);
           if (cellDataRaw) {
              // Handle raw object directly (serde_wasm_bindgen returns JS object)
-             let data = cellDataRaw; 
+             let data = cellDataRaw;
              // If it happens to be a string (from JSON.stringify), parse it
              if (typeof cellDataRaw === 'string') {
                  data = JSON.parse(cellDataRaw);
@@ -113,9 +113,9 @@ export class GridRenderer {
              const cellX = this.theme.headerWidth + col * this.theme.defaultColWidth - scrollX;
              const cellY = this.theme.headerHeight + row * this.theme.defaultRowHeight - scrollY;
 
-             // Background
-             if (data.format?.background_color) {
-                 this.ctx.fillStyle = data.format.background_color;
+             // Background - FIXED: camelCase property names
+             if (data.format?.backgroundColor) {
+                 this.ctx.fillStyle = data.format.backgroundColor;
                  this.ctx.fillRect(cellX, cellY, this.theme.defaultColWidth, this.theme.defaultRowHeight);
              }
 
@@ -123,16 +123,23 @@ export class GridRenderer {
              let fontStyle = '';
              if (data.format?.bold) fontStyle += 'bold ';
              if (data.format?.italic) fontStyle += 'italic ';
-             const fontSize = data.format?.font_size || 13;
+             const fontSize = data.format?.fontSize || 13;
              this.ctx.font = `${fontStyle}${fontSize}px Arial`;
-             this.ctx.fillStyle = data.format?.text_color || this.theme.cellTextColor;
+             this.ctx.fillStyle = data.format?.textColor || this.theme.cellTextColor;
 
-             const hAlign = data.format?.horizontal_align || 'left';
+             const hAlign = data.format?.horizontalAlign || 'left';
              this.ctx.textAlign = hAlign as CanvasTextAlign;
 
-             let textX = cellX + this.theme.cellPadding;
-             if (hAlign === 'center') textX = cellX + this.theme.defaultColWidth / 2;
-             if (hAlign === 'right') textX = cellX + this.theme.defaultColWidth - this.theme.cellPadding;
+             // Set reference point based on textAlign expectation
+             let textX: number;
+             if (hAlign === 'center') {
+                 textX = cellX + this.theme.defaultColWidth / 2;
+             } else if (hAlign === 'right') {
+                 textX = cellX + this.theme.defaultColWidth - this.theme.cellPadding;
+             } else {
+                 // 'left' alignment
+                 textX = cellX + this.theme.cellPadding;
+             }
 
              const textY = cellY + this.theme.defaultRowHeight / 2;
 
@@ -141,22 +148,29 @@ export class GridRenderer {
              this.ctx.beginPath();
              this.ctx.rect(cellX, cellY, this.theme.defaultColWidth, this.theme.defaultRowHeight);
              this.ctx.clip();
-             
-             this.ctx.fillText(data.display_value || '', textX, textY);
-             
+
+             // FIXED: Use camelCase displayValue
+             this.ctx.fillText(data.displayValue || '', textX, textY);
+
              // Underline
              if (data.format?.underline) {
-                 const textWidth = this.ctx.measureText(data.display_value || '').width;
-                 let lineX = textX;
-                 if (hAlign === 'center') lineX -= textWidth / 2;
-                 if (hAlign === 'right') lineX -= textWidth;
-                 this.ctx.fillRect(lineX, textY + fontSize/2 + 1, textWidth, 1);
+                 const textWidth = this.ctx.measureText(data.displayValue || '').width;
+                 let lineX: number;
+                 if (hAlign === 'center') {
+                     lineX = textX - textWidth / 2;
+                 } else if (hAlign === 'right') {
+                     lineX = textX - textWidth;
+                 } else {
+                     // 'left' alignment
+                     lineX = textX;
+                 }
+                 this.ctx.fillRect(lineX, textY + fontSize / 2 + 1, textWidth, 1);
              }
 
              this.ctx.restore();
           }
         } catch (e) {
-          // Ignore empty cells
+          console.error('[GridRenderer] Error rendering cell:', { row, col, error: e });
         }
       }
     }
