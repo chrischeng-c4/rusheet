@@ -5,6 +5,7 @@ import { defaultTheme, CellPosition } from '../types';
 export function useGrid() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<GridController | null>(null);
   const [activeCell, setActiveCell] = useState<CellPosition>({ row: 0, col: 0 });
   const [isEditing, setIsEditing] = useState(false);
@@ -21,10 +22,15 @@ export function useGrid() {
         const wasm = await import('../../../../../pkg/rusheet_wasm');
         await wasm.default();
         const eng = new wasm.SpreadsheetEngine();
-        
+
         // Setup initial data
         eng.setCellValue(0, 0, "Test");
-        
+        eng.setCellValue(1, 1, "42");
+        eng.setCellValue(2, 2, "=2+2");
+
+        // Clear undo history so initial data isn't undoable
+        eng.clearHistory();
+
         setEngine(eng);
       } catch (err) {
         console.error('Failed to load WASM:', err);
@@ -35,11 +41,14 @@ export function useGrid() {
 
   // Sync Dimensions
   useEffect(() => {
-      if (engine) {
+      if (engine && controllerRef.current) {
           try {
               const dimJson = engine.getDimensions();
               const dim = JSON.parse(dimJson);
               setTotalDimensions({ width: dim.width, height: dim.height });
+
+              // Set max bounds on controller for navigation
+              controllerRef.current.setMaxBounds(dim.rows, dim.cols);
           } catch(e) {
               console.warn("Failed to get dimensions", e);
           }
@@ -48,10 +57,11 @@ export function useGrid() {
 
   // Initialize Controller
   useEffect(() => {
-    if (!canvasRef.current || !engine) return;
+    if (!canvasRef.current || !containerRef.current || !engine) return;
 
     const controller = new GridController(
       canvasRef.current,
+      containerRef.current,
       defaultTheme,
       engine,
       {
@@ -95,6 +105,7 @@ export function useGrid() {
   return {
     canvasRef,
     containerRef,
+    scrollerRef,
     controller: controllerRef.current,
     activeCell,
     isEditing,
