@@ -31,6 +31,7 @@ pub struct CellData {
 /// Cell format data for JavaScript
 #[derive(Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+#[serde(default)]
 pub struct CellFormatData {
     #[serde(skip_serializing_if = "is_false")]
     pub bold: bool,
@@ -39,14 +40,19 @@ pub struct CellFormatData {
     #[serde(skip_serializing_if = "is_false")]
     pub underline: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "fontSize")]
     pub font_size: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "textColor")]
     pub text_color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "backgroundColor")]
     pub background_color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "horizontalAlign")]
     pub horizontal_align: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "verticalAlign")]
     pub vertical_align: Option<String>,
 }
 
@@ -232,7 +238,13 @@ impl SpreadsheetEngine {
     pub fn set_cell_format(&mut self, row: u32, col: u32, format_json: &str) -> bool {
         let format_data: CellFormatData = match serde_json::from_str(format_json) {
             Ok(f) => f,
-            Err(_) => return false,
+            Err(e) => {
+                web_sys::console::log_1(&format!(
+                    "Error deserializing format for cell ({}, {}): {}",
+                    row, col, e
+                ).into());
+                return false;
+            }
         };
 
         let coord = CellCoord::new(row, col);
@@ -256,7 +268,13 @@ impl SpreadsheetEngine {
     ) -> bool {
         let format_data: CellFormatData = match serde_json::from_str(format_json) {
             Ok(f) => f,
-            Err(_) => return false,
+            Err(e) => {
+                web_sys::console::log_1(&format!(
+                    "Error deserializing range format ({},{}) to ({},{}): {}",
+                    start_row, start_col, end_row, end_col, e
+                ).into());
+                return false;
+            }
         };
 
         let start = CellCoord::new(start_row, start_col);
@@ -542,4 +560,73 @@ fn cell_format_from_data(data: &CellFormatData) -> CellFormat {
     }
 
     format
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cell_format_data_deserialization() {
+        // Test camelCase JSON from frontend
+        let json = r##"{
+            "bold": true,
+            "italic": false,
+            "fontSize": 12,
+            "textColor": "#ff0000",
+            "backgroundColor": "#00ff00",
+            "horizontalAlign": "center",
+            "verticalAlign": "top"
+        }"##;
+
+        let result: Result<CellFormatData, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "Failed to deserialize camelCase format data");
+
+        let format = result.unwrap();
+        assert_eq!(format.bold, true);
+        assert_eq!(format.font_size, Some(12));
+        assert_eq!(format.text_color, Some("#ff0000".to_string()));
+        assert_eq!(format.background_color, Some("#00ff00".to_string()));
+        assert_eq!(format.horizontal_align, Some("center".to_string()));
+        assert_eq!(format.vertical_align, Some("top".to_string()));
+    }
+
+    #[test]
+    fn test_cell_format_data_round_trip() {
+        let format = CellFormatData {
+            bold: true,
+            italic: false,
+            underline: false,
+            font_size: Some(14),
+            text_color: Some("#ff0000".to_string()),
+            background_color: Some("#00ff00".to_string()),
+            horizontal_align: Some("right".to_string()),
+            vertical_align: Some("bottom".to_string()),
+        };
+
+        let json = serde_json::to_string(&format).unwrap();
+        let deserialized: CellFormatData = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(format.bold, deserialized.bold);
+        assert_eq!(format.font_size, deserialized.font_size);
+        assert_eq!(format.text_color, deserialized.text_color);
+        assert_eq!(format.background_color, deserialized.background_color);
+        assert_eq!(format.horizontal_align, deserialized.horizontal_align);
+        assert_eq!(format.vertical_align, deserialized.vertical_align);
+    }
+
+    #[test]
+    fn test_cell_format_data_partial_fields() {
+        // Test that partial fields deserialize correctly
+        let json = r##"{
+            "bold": true,
+            "textColor": "#ff0000"
+        }"##;
+
+        let format: CellFormatData = serde_json::from_str(json).unwrap();
+        assert_eq!(format.bold, true);
+        assert_eq!(format.italic, false); // default
+        assert_eq!(format.text_color, Some("#ff0000".to_string()));
+        assert_eq!(format.font_size, None); // not provided
+    }
 }
