@@ -18,6 +18,7 @@ pub struct SpreadsheetEngine {
 
 /// Cell data for JavaScript
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CellData {
     pub value: Option<String>,
     pub display_value: String,
@@ -29,6 +30,7 @@ pub struct CellData {
 
 /// Cell format data for JavaScript
 #[derive(Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct CellFormatData {
     #[serde(skip_serializing_if = "is_false")]
     pub bold: bool,
@@ -349,6 +351,12 @@ impl SpreadsheetEngine {
     #[wasm_bindgen(js_name = canRedo)]
     pub fn can_redo(&self) -> bool {
         self.history.can_redo()
+    }
+
+    /// Clear undo/redo history
+    #[wasm_bindgen(js_name = clearHistory)]
+    pub fn clear_history(&mut self) {
+        self.history = HistoryManager::new(100);
     }
 
     // --- Sheet Management ---

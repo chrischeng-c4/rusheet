@@ -101,8 +101,10 @@ impl SetCellFormatCommand {
 
 impl Command for SetCellFormatCommand {
     fn execute(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        // Capture old format first (immutable borrow)
         self.old_format = sheet.get_cell(self.coord).map(|c| c.format.clone());
 
+        // Then apply new format (mutable borrow)
         let cell = sheet.get_cell_mut(self.coord);
         cell.format = self.new_format.clone();
 
@@ -155,14 +157,13 @@ impl Command for SetRangeFormatCommand {
             for col in min_col..=max_col {
                 let coord = CellCoord::new(row, col);
 
-                // Capture old format
-                if let Some(cell) = sheet.get_cell(coord) {
-                    self.old_formats.push((coord, cell.format.clone()));
-                } else {
-                    self.old_formats.push((coord, CellFormat::default()));
-                }
+                // Capture old format (immutable borrow)
+                let old_format = sheet.get_cell(coord)
+                    .map(|c| c.format.clone())
+                    .unwrap_or_default();
+                self.old_formats.push((coord, old_format));
 
-                // Apply new format
+                // Apply new format (mutable borrow)
                 let cell = sheet.get_cell_mut(coord);
                 cell.format = self.new_format.clone();
 

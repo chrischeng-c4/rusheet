@@ -57,3 +57,8 @@ lint:
 update-rust:
     rustup update stable
     rustup target add wasm32-unknown-unknown
+
+# Run the example
+example: build-wasm
+    cp -r pkg example/src/pkg
+    cd example && npm install && npm run dev -- -p 3300

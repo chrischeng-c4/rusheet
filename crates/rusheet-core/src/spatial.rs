@@ -46,8 +46,10 @@ impl FenwickTree {
     ///
     /// Time complexity: O(log N)
     pub fn prefix_sum(&self, index: usize) -> f64 {
+        // Clamp index to valid range to prevent out of bounds access
+        let safe_index = index.min(self.capacity().saturating_sub(1));
         let mut sum = 0.0;
-        let mut idx = index + 1; // Convert to 1-indexed
+        let mut idx = safe_index + 1; // Convert to 1-indexed
         while idx > 0 {
             sum += self.tree[idx];
             idx -= idx & idx.wrapping_neg(); // Remove least significant bit

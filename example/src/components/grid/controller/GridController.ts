@@ -4,6 +4,7 @@ import { GridRenderer } from '../renderer/GridRenderer';
 export class GridController {
   private renderer: GridRenderer;
   private canvas: HTMLCanvasElement;
+  private interactionTarget: HTMLElement;
   private theme: GridTheme;
   private engine: any;
 
@@ -12,7 +13,9 @@ export class GridController {
   private activeCell: CellPosition = { row: 0, col: 0 };
   private selectionRange: CellRange | null = null;
   private isDragging = false;
-  
+  private maxRows: number = 2000;
+  private maxCols: number = 100;
+
   // Callbacks
   private onActiveCellChange?: (pos: CellPosition) => void;
   private onEditStart?: (pos: CellPosition, value: string) => void;
@@ -20,6 +23,7 @@ export class GridController {
 
   constructor(
     canvas: HTMLCanvasElement,
+    interactionTarget: HTMLElement,
     theme: GridTheme,
     engine: any,
     callbacks: {
@@ -29,6 +33,7 @@ export class GridController {
     }
   ) {
     this.canvas = canvas;
+    this.interactionTarget = interactionTarget;
     this.theme = theme;
     this.engine = engine;
     this.renderer = new GridRenderer(canvas, theme, engine);
@@ -53,6 +58,11 @@ export class GridController {
     this.render();
   }
 
+  public setMaxBounds(maxRows: number, maxCols: number) {
+    this.maxRows = maxRows;
+    this.maxCols = maxCols;
+  }
+
   public getActiveCell(): CellPosition {
     return this.activeCell;
   }
@@ -74,14 +84,14 @@ export class GridController {
   }
 
   private bindEvents() {
-    this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
-    this.canvas.addEventListener('dblclick', this.handleDoubleClick.bind(this));
-    this.canvas.addEventListener('wheel', this.handleWheel.bind(this));
+    this.interactionTarget.addEventListener('mousedown', this.handleMouseDown.bind(this));
+    this.interactionTarget.addEventListener('dblclick', this.handleDoubleClick.bind(this));
+    this.interactionTarget.addEventListener('wheel', this.handleWheel.bind(this));
     // Keyboard events are handled by the container (React) or global listener
   }
 
   private handleMouseDown(e: MouseEvent) {
-    const rect = this.canvas.getBoundingClientRect();
+    const rect = this.interactionTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
@@ -117,7 +127,7 @@ export class GridController {
             if (cellData) {
                 // Ensure we get the raw formula if present
                 const data = typeof cellData === 'string' ? JSON.parse(cellData) : cellData;
-                value = data.formula || data.display_value || '';
+                value = data.formula || data.displayValue || '';
             }
             this.onEditStart?.(this.activeCell, value);
         } catch(e) {
@@ -139,17 +149,31 @@ export class GridController {
       // Basic Navigation
       let { row, col } = this.activeCell;
 
+      // Prevent default for navigation keys BEFORE processing
+      const navKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'];
+      if (navKeys.includes(e.key)) {
+        e.preventDefault();
+      }
+
       switch(e.key) {
         case 'ArrowUp': row = Math.max(0, row - 1); break;
-        case 'ArrowDown': row++; break;
+        case 'ArrowDown': row = Math.min(this.maxRows - 1, row + 1); break;
         case 'ArrowLeft': col = Math.max(0, col - 1); break;
-        case 'ArrowRight': col++; break;
-        case 'Enter': 
+        case 'ArrowRight': col = Math.min(this.maxCols - 1, col + 1); break;
+        case 'Enter':
             // If not editing, move down. If Shift, move up.
-            if (e.shiftKey) row = Math.max(0, row - 1); else row++;
+            if (e.shiftKey) {
+              row = Math.max(0, row - 1);
+            } else {
+              row = Math.min(this.maxRows - 1, row + 1);
+            }
             break;
         case 'Tab':
-            if (e.shiftKey) col = Math.max(0, col - 1); else col++;
+            if (e.shiftKey) {
+              col = Math.max(0, col - 1);
+            } else {
+              col = Math.min(this.maxCols - 1, col + 1);
+            }
             break;
         case 'Delete':
         case 'Backspace':
@@ -163,6 +187,63 @@ export class GridController {
       }
 
       this.setActiveCell(row, col);
-      e.preventDefault();
+  }
+
+  public async handleCopy(): Promise<void> {
+    // Copy active cell value to system clipboard
+    const { row, col } = this.activeCell;
+
+    if (!this.engine) return;
+
+    try {
+      // Get cell data
+      const cellData = this.engine.getCellData(row, col);
+
+      if (!cellData) {
+        // Empty cell - copy empty string
+        await navigator.clipboard.writeText('');
+        console.log('[GridController] Copied empty cell');
+        return;
+      }
+
+      // Parse cell data
+      const data = typeof cellData === 'string' ? JSON.parse(cellData) : cellData;
+      const value = data.displayValue || '';
+
+      // Write to system clipboard
+      await navigator.clipboard.writeText(value);
+      console.log('[GridController] Copied cell value:', value);
+    } catch (error) {
+      console.error('[GridController] Copy failed:', error);
+    }
+  }
+
+  public async handlePaste(): Promise<void> {
+    // Paste from system clipboard to active cell
+    const { row, col } = this.activeCell;
+
+    if (!this.engine) return;
+
+    try {
+      // Read from system clipboard
+      const clipboardText = await navigator.clipboard.readText();
+
+      // For MVP: treat as single value (no tab/newline parsing)
+      const value = clipboardText.trim();
+
+      // Set cell value
+      this.engine.setCellValue(row, col, value);
+      this.render();
+      console.log('[GridController] Pasted value:', value);
+    } catch (error) {
+      console.error('[GridController] Paste failed:', error);
+
+      // Handle common clipboard errors
+      if (error instanceof DOMException) {
+        if (error.name === 'NotAllowedError') {
+          console.warn('[GridController] Clipboard access denied - check browser permissions');
+        }
+      }
+    }
   }
 }

@@ -167,6 +167,20 @@ export default function Grid() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Detect copy: Ctrl+C or Cmd+C (Mac)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && !isEditing) {
+      e.preventDefault();
+      controller?.handleCopy();
+      return;
+    }
+
+    // Detect paste: Ctrl+V or Cmd+V (Mac)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && !isEditing) {
+      e.preventDefault();
+      controller?.handlePaste();
+      return;
+    }
+
     // If user starts typing when NOT editing, start editing with that character
     if (!isEditing && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
