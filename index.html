@@ -5,10 +5,129 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RuSheet - Spreadsheet</title>
     <link rel="stylesheet" href="/src/styles/main.css" />
+    <style>
+      .toolbar-group {
+        display: flex;
+        gap: 4px;
+        padding: 0 8px;
+        border-left: 1px solid #ddd;
+      }
+
+      .toolbar-btn {
+        padding: 4px 8px;
+        background-color: #f0f0f0;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 12px;
+        user-select: none;
+      }
+
+      .toolbar-btn:hover {
+        background-color: #e0e0e0;
+      }
+
+      .toolbar-btn:active {
+        background-color: #d0d0d0;
+      }
+
+      #toolbar {
+        display: flex;
+        align-items: center;
+        padding: 8px;
+        background-color: #f5f5f5;
+        border-bottom: 1px solid #ddd;
+      }
+
+      .toolbar-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        font-size: 12px;
+        user-select: none;
+        cursor: pointer;
+      }
+
+      .toolbar-checkbox input[type="checkbox"] {
+        cursor: pointer;
+      }
+
+      /* Autocomplete dropdown */
+      .autocomplete-dropdown {
+        position: absolute;
+        background: white;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        max-height: 200px;
+        width: 300px;
+        overflow-y: auto;
+        z-index: 2000;
+        display: none;
+      }
+
+      .autocomplete-item {
+        padding: 8px 12px;
+        cursor: pointer;
+        border-bottom: 1px solid #f0f0f0;
+      }
+
+      .autocomplete-item:last-child {
+        border-bottom: none;
+      }
+
+      .autocomplete-item:hover,
+      .autocomplete-item.selected {
+        background-color: #e3f2fd;
+      }
+
+      .autocomplete-main {
+        font-weight: bold;
+        font-size: 14px;
+        color: #333;
+      }
+
+      .autocomplete-syntax {
+        font-size: 12px;
+        color: #666;
+        margin-top: 2px;
+      }
+
+      .autocomplete-desc {
+        font-size: 11px;
+        color: #999;
+        margin-top: 4px;
+      }
+    </style>
   </head>
   <body>
     <div id="app">
-      <header id="toolbar"></header>
+      <header id="toolbar">
+        <!-- Persistence buttons -->
+        <div class="toolbar-group">
+          <button id="save-btn" class="toolbar-btn" title="Save to Browser Storage">
+            💾 Save
+          </button>
+          <button id="load-btn" class="toolbar-btn" title="Load from Browser Storage">
+            📂 Load
+          </button>
+          <button id="export-btn" class="toolbar-btn" title="Export to File">
+            ⬇️ Export
+          </button>
+          <label for="import-input" class="toolbar-btn" title="Import from File">
+            ⬆️ Import
+          </label>
+          <input type="file" id="import-input" accept=".json" style="display: none;">
+        </div>
+        <!-- Autocomplete toggle -->
+        <div class="toolbar-group">
+          <label class="toolbar-checkbox">
+            <input type="checkbox" id="autocomplete-toggle" checked>
+            Autocomplete
+          </label>
+        </div>
+      </header>
       <div id="formula-bar">
         <span id="cell-address">A1</span>
         <input type="text" id="formula-input" placeholder="Enter value or formula..." />

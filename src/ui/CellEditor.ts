@@ -1,6 +1,8 @@
 import GridRenderer from '../canvas/GridRenderer';
 import * as WasmBridge from '../core/WasmBridge';
 import { theme } from '../canvas/theme';
+import { AutocompleteEngine } from './AutocompleteEngine';
+import { AutocompleteUI } from './AutocompleteUI';
 
 export default class CellEditor {
   private container: HTMLElement;
@@ -12,6 +14,10 @@ export default class CellEditor {
   private currentRow: number = -1;
   private currentCol: number = -1;
   private onCellChange?: (row: number, col: number) => void;
+  private autocompleteEngine: AutocompleteEngine;
+  private autocompleteUI: AutocompleteUI;
+  private autocompleteEnabled: boolean = true;
+  private autocompleteDebounce: number | null = null;
 
   constructor(
     container: HTMLElement,
@@ -24,6 +30,8 @@ export default class CellEditor {
     this.bridge = bridge;
     this.formulaBar = formulaBar;
     this.textarea = this.createTextarea();
+    this.autocompleteEngine = new AutocompleteEngine();
+    this.autocompleteUI = new AutocompleteUI(container);
     this.setupEventListeners();
   }
 
@@ -72,6 +80,31 @@ export default class CellEditor {
    * Handle textarea keydown events
    */
   private handleTextareaKeydown(event: KeyboardEvent): void {
+    // Handle autocomplete shortcuts first
+    if (this.autocompleteUI.isVisible()) {
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        this.acceptAutocomplete();
+        return;
+      }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        this.autocompleteUI.navigate(1);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        this.autocompleteUI.navigate(-1);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.autocompleteUI.hide();
+        return;
+      }
+    }
+
+    // Existing key handling
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       this.commit();
@@ -107,6 +140,18 @@ export default class CellEditor {
     // Auto-resize textarea height
     this.textarea.style.height = 'auto';
     this.textarea.style.height = this.textarea.scrollHeight + 'px';
+
+    // Trigger autocomplete with debounce
+    if (this.autocompleteEnabled) {
+      if (this.autocompleteDebounce !== null) {
+        clearTimeout(this.autocompleteDebounce);
+      }
+
+      this.autocompleteDebounce = window.setTimeout(() => {
+        this.showAutocomplete();
+        this.autocompleteDebounce = null;
+      }, 150);
+    }
   }
 
   /**
@@ -311,5 +356,71 @@ export default class CellEditor {
   public getCurrentPosition(): { row: number; col: number } | null {
     if (!this.isEditing) return null;
     return { row: this.currentRow, col: this.currentCol };
+  }
+
+  /**
+   * Show autocomplete suggestions based on current input
+   */
+  private showAutocomplete(): void {
+    if (!this.textarea) return;
+
+    const text = this.textarea.value;
+    const cursorPos = this.textarea.selectionStart || 0;
+    const context = this.autocompleteEngine.createContext(text, cursorPos);
+
+    if (!context.isFormula) {
+      this.autocompleteUI.hide();
+      return;
+    }
+
+    const suggestions = this.autocompleteEngine.getSuggestions(context);
+
+    if (suggestions.length > 0) {
+      // Calculate cursor position for dropdown placement
+      const rect = this.textarea.getBoundingClientRect();
+      this.autocompleteUI.show(suggestions, {
+        x: rect.left,
+        y: rect.bottom,
+      });
+    } else {
+      this.autocompleteUI.hide();
+    }
+  }
+
+  /**
+   * Accept the currently selected autocomplete suggestion
+   */
+  private acceptAutocomplete(): void {
+    const suggestion = this.autocompleteUI.getSelected();
+    if (!suggestion || !this.textarea) return;
+
+    const text = this.textarea.value;
+    const cursorPos = this.textarea.selectionStart || 0;
+    const context = this.autocompleteEngine.createContext(text, cursorPos);
+
+    // Replace current token with suggestion
+    const before = text.substring(0, context.tokenStartPos);
+    const after = text.substring(cursorPos);
+    const newText = before + suggestion.insertText + after;
+
+    this.textarea.value = newText;
+    this.formulaBar.value = newText;
+
+    // Set cursor position after inserted text
+    const newCursorPos = context.tokenStartPos + suggestion.insertText.length;
+    this.textarea.setSelectionRange(newCursorPos, newCursorPos);
+
+    this.autocompleteUI.hide();
+    this.textarea.focus();
+  }
+
+  /**
+   * Toggle autocomplete feature on or off
+   */
+  public toggleAutocomplete(enabled: boolean): void {
+    this.autocompleteEnabled = enabled;
+    if (!enabled) {
+      this.autocompleteUI.hide();
+    }
   }
 }

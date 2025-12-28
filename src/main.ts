@@ -6,6 +6,7 @@ import * as WasmBridge from './core/WasmBridge';
 import GridRenderer from './canvas/GridRenderer';
 import InputController from './ui/InputController';
 import CellEditor from './ui/CellEditor';
+import { PersistenceManager } from './core/PersistenceManager';
 
 /**
  * Convert column index to Excel-style letter notation
@@ -33,6 +34,16 @@ async function main(): Promise<void> {
     console.log('[RuSheet] Loading WASM module...');
     await WasmBridge.initWasm();
     console.log('[RuSheet] WASM module loaded successfully');
+
+    // Step 1.5: Initialize persistence and try to load saved data
+    console.log('[RuSheet] Initializing persistence...');
+    const persistence = new PersistenceManager();
+    const hasData = persistence.load();
+    if (hasData) {
+      console.log('[RuSheet] Loaded saved workbook from previous session');
+    } else {
+      console.log('[RuSheet] Starting with empty workbook');
+    }
 
     // Step 2: Get DOM elements
     console.log('[RuSheet] Getting DOM elements...');
@@ -102,6 +113,7 @@ async function main(): Promise<void> {
     // Set callback for cell editor to update address when moving cells
     cellEditor.setCellChangeCallback((row: number, col: number) => {
       cellAddress.textContent = `${colToLetter(col)}${row + 1}`;
+      persistence.scheduleSave(); // Auto-save after edit
       renderer.render();
     });
 
@@ -155,47 +167,123 @@ async function main(): Promise<void> {
       }
     });
 
-    // Step 9: Add test data to demonstrate functionality
-    console.log('[RuSheet] Adding test data...');
+    // Set up persistence buttons
+    console.log('[RuSheet] Setting up persistence buttons...');
+    const saveBtn = document.getElementById('save-btn');
+    const loadBtn = document.getElementById('load-btn');
+    const exportBtn = document.getElementById('export-btn');
+    const importInput = document.getElementById('import-input') as HTMLInputElement;
 
-    // Add header row
-    WasmBridge.setCellValue(0, 0, 'Product');
-    WasmBridge.setCellValue(0, 1, 'Quantity');
-    WasmBridge.setCellValue(0, 2, 'Price');
-    WasmBridge.setCellValue(0, 3, 'Total');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', () => {
+        if (persistence.save()) {
+          alert('Workbook saved successfully!');
+        } else {
+          alert('Failed to save workbook');
+        }
+      });
+    }
 
-    // Add data rows
-    WasmBridge.setCellValue(1, 0, 'Apples');
-    WasmBridge.setCellValue(1, 1, '10');
-    WasmBridge.setCellValue(1, 2, '1.5');
-    WasmBridge.setCellValue(1, 3, '=B2*C2');
+    if (loadBtn) {
+      loadBtn.addEventListener('click', () => {
+        if (persistence.load()) {
+          alert('Workbook loaded successfully!');
+          renderer.render();
+        } else {
+          alert('No saved workbook found or load failed');
+        }
+      });
+    }
 
-    WasmBridge.setCellValue(2, 0, 'Oranges');
-    WasmBridge.setCellValue(2, 1, '15');
-    WasmBridge.setCellValue(2, 2, '2.0');
-    WasmBridge.setCellValue(2, 3, '=B3*C3');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => {
+        const filename = prompt('Enter filename:', 'rusheet-workbook.json');
+        if (filename) {
+          persistence.exportToFile(filename);
+        }
+      });
+    }
 
-    WasmBridge.setCellValue(3, 0, 'Bananas');
-    WasmBridge.setCellValue(3, 1, '20');
-    WasmBridge.setCellValue(3, 2, '0.75');
-    WasmBridge.setCellValue(3, 3, '=B4*C4');
+    if (importInput) {
+      importInput.addEventListener('change', (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (file) {
+          persistence.importFromFile(file, (success) => {
+            if (success) {
+              alert('Workbook imported successfully!');
+              renderer.render();
+            } else {
+              alert('Failed to import workbook');
+            }
+          });
+        }
+      });
+    }
 
-    // Add summary row
-    WasmBridge.setCellValue(4, 0, 'Total:');
-    WasmBridge.setCellValue(4, 3, '=SUM(D2:D4)');
-
-    // Format header row
-    WasmBridge.setRangeFormat(0, 0, 0, 3, {
-      bold: true,
-      background_color: '#f0f0f0',
+    // Save before page unload
+    window.addEventListener('beforeunload', () => {
+      persistence.save();
     });
 
-    // Format summary row
-    WasmBridge.setRangeFormat(4, 0, 4, 3, {
-      bold: true,
-    });
+    // Set up autocomplete toggle
+    console.log('[RuSheet] Setting up autocomplete toggle...');
+    const autocompleteToggle = document.getElementById('autocomplete-toggle') as HTMLInputElement;
+    if (autocompleteToggle) {
+      // Load preference
+      const enabled = localStorage.getItem('rusheet.autocomplete.enabled') !== 'false';
+      autocompleteToggle.checked = enabled;
+      cellEditor.toggleAutocomplete(enabled);
 
-    console.log('[RuSheet] Test data added');
+      autocompleteToggle.addEventListener('change', () => {
+        const isEnabled = autocompleteToggle.checked;
+        cellEditor.toggleAutocomplete(isEnabled);
+        localStorage.setItem('rusheet.autocomplete.enabled', String(isEnabled));
+      });
+    }
+
+    // Step 9: Add test data to demonstrate functionality (only if no data was loaded)
+    if (!hasData) {
+      console.log('[RuSheet] Adding test data...');
+
+      // Add header row
+      WasmBridge.setCellValue(0, 0, 'Product');
+      WasmBridge.setCellValue(0, 1, 'Quantity');
+      WasmBridge.setCellValue(0, 2, 'Price');
+      WasmBridge.setCellValue(0, 3, 'Total');
+
+      // Add data rows
+      WasmBridge.setCellValue(1, 0, 'Apples');
+      WasmBridge.setCellValue(1, 1, '10');
+      WasmBridge.setCellValue(1, 2, '1.5');
+      WasmBridge.setCellValue(1, 3, '=B2*C2');
+
+      WasmBridge.setCellValue(2, 0, 'Oranges');
+      WasmBridge.setCellValue(2, 1, '15');
+      WasmBridge.setCellValue(2, 2, '2.0');
+      WasmBridge.setCellValue(2, 3, '=B3*C3');
+
+      WasmBridge.setCellValue(3, 0, 'Bananas');
+      WasmBridge.setCellValue(3, 1, '20');
+      WasmBridge.setCellValue(3, 2, '0.75');
+      WasmBridge.setCellValue(3, 3, '=B4*C4');
+
+      // Add summary row
+      WasmBridge.setCellValue(4, 0, 'Total:');
+      WasmBridge.setCellValue(4, 3, '=SUM(D2:D4)');
+
+      // Format header row
+      WasmBridge.setRangeFormat(0, 0, 0, 3, {
+        bold: true,
+        background_color: '#f0f0f0',
+      });
+
+      // Format summary row
+      WasmBridge.setRangeFormat(4, 0, 4, 3, {
+        bold: true,
+      });
+
+      console.log('[RuSheet] Test data added');
+    }
 
     // Step 10: Initial render
     console.log('[RuSheet] Performing initial render...');

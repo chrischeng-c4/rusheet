@@ -113,11 +113,17 @@ impl SpreadsheetEngine {
             let deps: HashSet<_> = refs.into_iter().map(|(r, c)| (r, c)).collect();
             self.dep_graph.set_dependencies((row, col), deps);
 
-            // Recalculate this cell and dependents
+            // Immediately evaluate the formula we just set
+            self.recalculate_cell(row, col);
+
+            // Then recalculate dependents
             if let Ok(order) = self.dep_graph.get_recalc_order((row, col)) {
                 for (r, c) in order {
-                    self.recalculate_cell(r, c);
-                    affected.push(CellCoord::new(r, c));
+                    if (r, c) != (row, col) {
+                        // Don't recalculate the formula cell twice
+                        self.recalculate_cell(r, c);
+                        affected.push(CellCoord::new(r, c));
+                    }
                 }
             }
         } else {
@@ -149,6 +155,13 @@ impl SpreadsheetEngine {
             if let CellContent::Formula { expression, .. } = &cell.content {
                 let expression = expression.clone();
 
+                // Log formula evaluation for debugging (only in WASM target)
+                #[cfg(all(debug_assertions, target_arch = "wasm32"))]
+                web_sys::console::log_1(&format!(
+                    "[Formula] Evaluating cell ({}, {}): {}",
+                    row, col, expression
+                ).into());
+
                 // Create closure to get cell values
                 let sheet = self.workbook.active_sheet();
                 let result = evaluate_formula(&expression, |r, c| {
@@ -157,6 +170,22 @@ impl SpreadsheetEngine {
                         .map(|c| c.computed_value().clone())
                         .unwrap_or(CellValue::Empty)
                 });
+
+                // Log result (only in WASM target)
+                #[cfg(all(debug_assertions, target_arch = "wasm32"))]
+                web_sys::console::log_1(&format!(
+                    "[Formula] Result for ({}, {}): {:?}",
+                    row, col, result
+                ).into());
+
+                // Check for errors and log them (only in WASM target)
+                #[cfg(target_arch = "wasm32")]
+                if matches!(result, CellValue::Error(_)) {
+                    web_sys::console::error_1(&format!(
+                        "[Formula Error] Cell ({}, {}) formula '{}' failed: {:?}",
+                        row, col, expression, result
+                    ).into());
+                }
 
                 // Update cached value
                 let sheet = self.workbook.active_sheet_mut();
@@ -181,7 +210,7 @@ impl SpreadsheetEngine {
 
         let data = if let Some(cell) = sheet.get_cell(coord) {
             CellData {
-                value: Some(cell.computed_value().as_text()),
+                value: Some(cell.content.original_input()),
                 display_value: cell.content.display_value(),
                 formula: cell.content.formula_expression().map(String::from),
                 format: CellFormatData::from(&cell.format),
@@ -219,7 +248,7 @@ impl SpreadsheetEngine {
                 let coord = CellCoord::new(row, col);
                 if let Some(cell) = sheet.get_cell(coord) {
                     cells.push(CellData {
-                        value: Some(cell.computed_value().as_text()),
+                        value: Some(cell.content.original_input()),
                         display_value: cell.content.display_value(),
                         formula: cell.content.formula_expression().map(String::from),
                         format: CellFormatData::from(&cell.format),
@@ -628,5 +657,235 @@ mod tests {
         assert_eq!(format.italic, false); // default
         assert_eq!(format.text_color, Some("#ff0000".to_string()));
         assert_eq!(format.font_size, None); // not provided
+    }
+}
+
+#[cfg(test)]
+mod bug_fixes {
+    use rusheet_core::{CellCoord, Sheet};
+
+    #[test]
+    fn test_bug_1_3_number_preservation() {
+        // Test at the core level without WASM
+        let mut sheet = Sheet::new("Test");
+
+        // Enter "10" in B2 (row=1, col=1)
+        let coord = CellCoord::new(1, 1);
+        let content = rusheet_core::sheet::parse_cell_input("10");
+        let cell = rusheet_core::Cell::new(content);
+        sheet.set_cell(coord, cell);
+
+        // Verify original_input returns "10"
+        let cell = sheet.get_cell(coord).unwrap();
+        let original = cell.content.original_input();
+        assert_eq!(original, "10",
+                   "Bug #1-3: Number '10' should be preserved as original input");
+        assert_eq!(cell.content.display_value(), "10");
+
+        // Enter formula "=B2" in B3
+        let coord_b3 = CellCoord::new(1, 2);
+        let formula_content = rusheet_core::sheet::parse_cell_input("=B2");
+        let formula_cell = rusheet_core::Cell::new(formula_content);
+        sheet.set_cell(coord_b3, formula_cell);
+
+        // Re-check B2 - should STILL be "10", not corrupted
+        let cell_again = sheet.get_cell(coord).unwrap();
+        let original_again = cell_again.content.original_input();
+        assert_eq!(original_again, "10",
+                   "Bug #1-3: Re-reading B2 should still return '10', not 'B2C2'");
+    }
+
+    #[test]
+    fn test_original_input_preserved_for_all_types() {
+        // Test at the core level without WASM
+        let mut sheet = Sheet::new("Test");
+
+        // Test number
+        let content = rusheet_core::sheet::parse_cell_input("42");
+        sheet.set_cell(CellCoord::new(0, 0), rusheet_core::Cell::new(content));
+        let cell = sheet.get_cell(CellCoord::new(0, 0)).unwrap();
+        assert_eq!(cell.content.original_input(), "42");
+
+        // Test percentage
+        let content = rusheet_core::sheet::parse_cell_input("50%");
+        sheet.set_cell(CellCoord::new(0, 1), rusheet_core::Cell::new(content));
+        let cell = sheet.get_cell(CellCoord::new(0, 1)).unwrap();
+        assert_eq!(cell.content.original_input(), "50%");
+        assert_eq!(cell.content.display_value(), "0.5");
+
+        // Test boolean
+        let content = rusheet_core::sheet::parse_cell_input("TRUE");
+        sheet.set_cell(CellCoord::new(0, 2), rusheet_core::Cell::new(content));
+        let cell = sheet.get_cell(CellCoord::new(0, 2)).unwrap();
+        assert_eq!(cell.content.original_input(), "TRUE");
+
+        // Test text
+        let content = rusheet_core::sheet::parse_cell_input("Hello");
+        sheet.set_cell(CellCoord::new(0, 3), rusheet_core::Cell::new(content));
+        let cell = sheet.get_cell(CellCoord::new(0, 3)).unwrap();
+        assert_eq!(cell.content.original_input(), "Hello");
+
+        // Test formula
+        let content = rusheet_core::sheet::parse_cell_input("=A1+B1");
+        sheet.set_cell(CellCoord::new(0, 4), rusheet_core::Cell::new(content));
+        let cell = sheet.get_cell(CellCoord::new(0, 4)).unwrap();
+        assert_eq!(cell.content.original_input(), "=A1+B1");
+    }
+
+    // Helper function to get cell data
+    fn get_cell_as_data(engine: &super::SpreadsheetEngine, row: u32, col: u32) -> super::CellData {
+        let coord = CellCoord::new(row, col);
+        let sheet = engine.workbook.active_sheet();
+
+        if let Some(cell) = sheet.get_cell(coord) {
+            super::CellData {
+                value: Some(cell.content.original_input()),
+                display_value: cell.content.display_value(),
+                formula: cell.content.formula_expression().map(String::from),
+                format: super::CellFormatData::from(&cell.format),
+                row,
+                col,
+            }
+        } else {
+            super::CellData {
+                value: None,
+                display_value: String::new(),
+                formula: None,
+                format: super::CellFormatData::default(),
+                row,
+                col,
+            }
+        }
+    }
+
+    #[test]
+    fn test_bug_4_formula_evaluation() {
+        let mut engine = super::SpreadsheetEngine::new();
+
+        // Test case from bug report: "=5+3" should display "8"
+        engine.set_cell_value(0, 0, "=5+3");
+
+        let data = get_cell_as_data(&engine, 0, 0);
+
+        assert_eq!(data.formula, Some("=5+3".to_string()), "Formula should be stored");
+        assert_eq!(data.display_value, "8", "Bug #4: '=5+3' should evaluate to '8', not empty");
+        assert_ne!(data.display_value, "", "Display value should not be empty");
+    }
+
+    #[test]
+    fn test_formula_with_cell_references() {
+        let mut engine = super::SpreadsheetEngine::new();
+
+        // Set up: A1=10, A2=20
+        engine.set_cell_value(0, 0, "10");
+        engine.set_cell_value(1, 0, "20");
+
+        // Formula: A3=A1+A2
+        engine.set_cell_value(2, 0, "=A1+A2");
+
+        let data = get_cell_as_data(&engine, 2, 0);
+        assert_eq!(data.formula, Some("=A1+A2".to_string()));
+        assert_eq!(data.display_value, "30", "A1+A2 should equal 30");
+    }
+
+    #[test]
+    fn test_formula_multiplication_division() {
+        let mut engine = super::SpreadsheetEngine::new();
+
+        // Test multiplication
+        engine.set_cell_value(0, 0, "=6*7");
+        let data = get_cell_as_data(&engine, 0, 0);
+        assert_eq!(data.display_value, "42", "6*7 should equal 42");
+
+        // Test division
+        engine.set_cell_value(0, 1, "=100/4");
+        let data = get_cell_as_data(&engine, 0, 1);
+        assert_eq!(data.display_value, "25", "100/4 should equal 25");
+
+        // Test combined operations
+        engine.set_cell_value(0, 2, "=(5+3)*2");
+        let data = get_cell_as_data(&engine, 0, 2);
+        assert_eq!(data.display_value, "16", "(5+3)*2 should equal 16");
+    }
+
+    #[test]
+    fn test_formula_recalculation_on_dependency_change() {
+        let mut engine = super::SpreadsheetEngine::new();
+
+        // Set up: A1=5, B1=A1*2
+        engine.set_cell_value(0, 0, "5");
+        engine.set_cell_value(0, 1, "=A1*2");
+
+        let data = get_cell_as_data(&engine, 0, 1);
+        assert_eq!(data.display_value, "10", "Initial: A1*2 = 5*2 = 10");
+
+        // Change A1 to 10
+        engine.set_cell_value(0, 0, "10");
+
+        // B1 should automatically recalculate
+        let data = get_cell_as_data(&engine, 0, 1);
+        assert_eq!(data.display_value, "20", "After change: A1*2 = 10*2 = 20");
+    }
+
+    #[test]
+    fn test_bug_7_persistence() {
+        let mut engine = super::SpreadsheetEngine::new();
+
+        // User enters data
+        engine.set_cell_value(0, 0, "Hello");
+        engine.set_cell_value(1, 0, "World");
+        engine.set_cell_value(2, 0, "=A1&\" \"&A2");  // Concatenation formula
+
+        // Simulate page refresh: serialize and deserialize
+        let json = engine.serialize();
+        assert!(!json.is_empty(), "Serialized JSON should not be empty");
+
+        let mut new_engine = super::SpreadsheetEngine::new();
+        let success = new_engine.deserialize(&json);
+
+        assert!(success, "Bug #7: Data should persist after refresh");
+
+        // Verify data is still there
+        let data1 = get_cell_as_data(&new_engine, 0, 0);
+        assert_eq!(data1.value, Some("Hello".to_string()),
+                   "Bug #7: 'Hello' should persist");
+
+        let data2 = get_cell_as_data(&new_engine, 1, 0);
+        assert_eq!(data2.value, Some("World".to_string()),
+                   "Bug #7: 'World' should persist");
+
+        // Verify formula persists and evaluates
+        let data3 = get_cell_as_data(&new_engine, 2, 0);
+        assert_eq!(data3.formula, Some("=A1&\" \"&A2".to_string()),
+                   "Formula should persist");
+    }
+
+    #[test]
+    fn test_serialization_preserves_formatting() {
+        use serde_json::json;
+
+        let mut engine = super::SpreadsheetEngine::new();
+
+        // Set cell value
+        engine.set_cell_value(0, 0, "Formatted");
+
+        // Apply formatting
+        let format = json!({
+            "bold": true,
+            "textColor": "#ff0000",
+            "backgroundColor": "#ffff00"
+        }).to_string();
+        engine.set_cell_format(0, 0, &format);
+
+        // Serialize and deserialize
+        let json = engine.serialize();
+        let mut new_engine = super::SpreadsheetEngine::new();
+        new_engine.deserialize(&json);
+
+        // Verify formatting persists
+        let data = get_cell_as_data(&new_engine, 0, 0);
+        assert_eq!(data.format.bold, true);
+        assert_eq!(data.format.text_color, Some("#ff0000".to_string()));
+        assert_eq!(data.format.background_color, Some("#ffff00".to_string()));
     }
 }

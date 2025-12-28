@@ -44,7 +44,10 @@ impl SetCellValueCommand {
     }
 
     pub fn from_value(coord: CellCoord, value: CellValue) -> Self {
-        Self::new(coord, CellContent::Value(value))
+        Self::new(coord, CellContent::Value {
+            value,
+            original_input: None,
+        })
     }
 
     pub fn from_input(coord: CellCoord, input: &str) -> Self {
@@ -70,7 +73,10 @@ impl Command for SetCellValueCommand {
         cell.content = self
             .old_content
             .clone()
-            .unwrap_or(CellContent::Value(CellValue::Empty));
+            .unwrap_or(CellContent::Value {
+                value: CellValue::Empty,
+                original_input: None,
+            });
 
         vec![self.coord]
     }
@@ -212,7 +218,10 @@ impl Command for ClearCellCommand {
         self.old_content = sheet.get_cell(self.coord).map(|c| c.content.clone());
 
         let cell = sheet.get_cell_mut(self.coord);
-        cell.content = CellContent::Value(CellValue::Empty);
+        cell.content = CellContent::Value {
+            value: CellValue::Empty,
+            original_input: None,
+        };
 
         vec![self.coord]
     }

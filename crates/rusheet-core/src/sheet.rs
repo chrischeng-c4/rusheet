@@ -373,38 +373,59 @@ pub fn parse_cell_input(input: &str) -> CellContent {
     let trimmed = input.trim();
 
     if trimmed.is_empty() {
-        return CellContent::Value(CellValue::Empty);
-    }
-
-    // Check for formula
-    if trimmed.starts_with('=') {
-        return CellContent::Formula {
-            expression: trimmed.to_string(),
-            cached_value: CellValue::Empty, // Will be calculated later
+        return CellContent::Value {
+            value: CellValue::Empty,
+            original_input: None,
         };
     }
 
-    // Check for boolean
+    // Formulas: store expression
+    if trimmed.starts_with('=') {
+        return CellContent::Formula {
+            expression: trimmed.to_string(),
+            cached_value: CellValue::Empty,
+        };
+    }
+
+    // Store original input for all value types
+    let original = trimmed.to_string();
+
+    // Boolean
     match trimmed.to_uppercase().as_str() {
-        "TRUE" => return CellContent::Value(CellValue::Boolean(true)),
-        "FALSE" => return CellContent::Value(CellValue::Boolean(false)),
+        "TRUE" => return CellContent::Value {
+            value: CellValue::Boolean(true),
+            original_input: Some(original),
+        },
+        "FALSE" => return CellContent::Value {
+            value: CellValue::Boolean(false),
+            original_input: Some(original),
+        },
         _ => {}
     }
 
-    // Check for number
+    // Number
     if let Ok(num) = trimmed.parse::<f64>() {
-        return CellContent::Value(CellValue::Number(num));
+        return CellContent::Value {
+            value: CellValue::Number(num),
+            original_input: Some(original),
+        };
     }
 
-    // Check for percentage (e.g., "50%")
+    // Percentage
     if trimmed.ends_with('%') {
         if let Ok(num) = trimmed[..trimmed.len() - 1].parse::<f64>() {
-            return CellContent::Value(CellValue::Number(num / 100.0));
+            return CellContent::Value {
+                value: CellValue::Number(num / 100.0),
+                original_input: Some(original),
+            };
         }
     }
 
-    // Default to text
-    CellContent::Value(CellValue::Text(trimmed.to_string()))
+    // Text
+    CellContent::Value {
+        value: CellValue::Text(trimmed.to_string()),
+        original_input: Some(original),
+    }
 }
 
 #[cfg(test)]
@@ -432,15 +453,15 @@ mod tests {
     fn test_parse_cell_input() {
         // Number
         let content = parse_cell_input("42");
-        assert!(matches!(content, CellContent::Value(CellValue::Number(n)) if n == 42.0));
+        assert!(matches!(content, CellContent::Value { value: CellValue::Number(n), .. } if n == 42.0));
 
         // Float
         let content = parse_cell_input("3.14");
-        assert!(matches!(content, CellContent::Value(CellValue::Number(n)) if (n - 3.14).abs() < 0.001));
+        assert!(matches!(content, CellContent::Value { value: CellValue::Number(n), .. } if (n - 3.14).abs() < 0.001));
 
         // Boolean
         let content = parse_cell_input("TRUE");
-        assert!(matches!(content, CellContent::Value(CellValue::Boolean(true))));
+        assert!(matches!(content, CellContent::Value { value: CellValue::Boolean(true), .. }));
 
         // Formula
         let content = parse_cell_input("=SUM(A1:A10)");
@@ -448,11 +469,11 @@ mod tests {
 
         // Text
         let content = parse_cell_input("Hello");
-        assert!(matches!(content, CellContent::Value(CellValue::Text(s)) if s == "Hello"));
+        assert!(matches!(content, CellContent::Value { value: CellValue::Text(s), .. } if s == "Hello"));
 
         // Percentage
         let content = parse_cell_input("50%");
-        assert!(matches!(content, CellContent::Value(CellValue::Number(n)) if (n - 0.5).abs() < 0.001));
+        assert!(matches!(content, CellContent::Value { value: CellValue::Number(n), .. } if (n - 0.5).abs() < 0.001));
     }
 
     #[test]

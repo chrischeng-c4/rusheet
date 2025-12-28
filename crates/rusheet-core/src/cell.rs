@@ -72,10 +72,19 @@ impl CellValue {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum CellContent {
-    Value(CellValue),
+    #[serde(rename = "Value")]
+    Value {
+        #[serde(rename = "value")]
+        value: CellValue,
+        #[serde(rename = "originalInput", skip_serializing_if = "Option::is_none")]
+        original_input: Option<String>,
+    },
+    #[serde(rename = "Formula")]
     Formula {
+        #[serde(rename = "expression")]
         /// Original formula text (e.g., "=SUM(A1:A10)")
         expression: String,
+        #[serde(rename = "cachedValue")]
         /// Computed/cached value
         cached_value: CellValue,
     },
@@ -83,7 +92,10 @@ pub enum CellContent {
 
 impl Default for CellContent {
     fn default() -> Self {
-        CellContent::Value(CellValue::Empty)
+        CellContent::Value {
+            value: CellValue::Empty,
+            original_input: None,
+        }
     }
 }
 
@@ -99,7 +111,7 @@ impl CellContent {
     /// Get the computed value (for both value and formula)
     pub fn computed_value(&self) -> &CellValue {
         match self {
-            CellContent::Value(v) => v,
+            CellContent::Value { value, .. } => value,
             CellContent::Formula { cached_value, .. } => cached_value,
         }
     }
@@ -120,6 +132,16 @@ impl CellContent {
     /// Get the display value as a string
     pub fn display_value(&self) -> String {
         self.computed_value().as_text()
+    }
+
+    /// Get the original user input string for editing
+    pub fn original_input(&self) -> String {
+        match self {
+            CellContent::Value { original_input, value } => {
+                original_input.clone().unwrap_or_else(|| value.as_text())
+            },
+            CellContent::Formula { expression, .. } => expression.clone(),
+        }
     }
 }
 
@@ -151,17 +173,26 @@ impl Cell {
 
     /// Create a cell with a number value
     pub fn number(value: f64) -> Self {
-        Cell::new(CellContent::Value(CellValue::Number(value)))
+        Cell::new(CellContent::Value {
+            value: CellValue::Number(value),
+            original_input: None,
+        })
     }
 
     /// Create a cell with a text value
     pub fn text(value: impl Into<String>) -> Self {
-        Cell::new(CellContent::Value(CellValue::Text(value.into())))
+        Cell::new(CellContent::Value {
+            value: CellValue::Text(value.into()),
+            original_input: None,
+        })
     }
 
     /// Create a cell with a boolean value
     pub fn boolean(value: bool) -> Self {
-        Cell::new(CellContent::Value(CellValue::Boolean(value)))
+        Cell::new(CellContent::Value {
+            value: CellValue::Boolean(value),
+            original_input: None,
+        })
     }
 
     /// Create a cell with a formula
@@ -176,7 +207,7 @@ impl Cell {
 
     /// Check if the cell is empty (empty value and default format)
     pub fn is_empty(&self) -> bool {
-        matches!(self.content, CellContent::Value(CellValue::Empty))
+        matches!(self.content, CellContent::Value { value: CellValue::Empty, .. })
             && self.format == CellFormat::default()
     }
 }
