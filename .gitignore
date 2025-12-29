@@ -56,3 +56,7 @@ Desktop.ini
 *.bak
 # Test screenshots
 **/__screenshots__/
+
+# VitePress
+docs/.vitepress/dist
+docs/.vitepress/cache

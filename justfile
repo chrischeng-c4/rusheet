@@ -73,3 +73,13 @@ update-rust:
 example: build-wasm
     cp -r pkg example/src/pkg
     cd example && npm install && npm run dev -- -p 3300
+
+# Documentation commands
+docs-dev:
+    pnpm docs:dev
+
+docs-build:
+    pnpm docs:build
+
+docs-preview:
+    pnpm docs:preview
