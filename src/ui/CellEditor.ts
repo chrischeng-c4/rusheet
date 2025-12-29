@@ -1,5 +1,6 @@
 import type { IGridRenderer } from '../types/renderer';
 import * as WasmBridge from '../core/WasmBridge';
+import { rusheet } from '../core/RusheetAPI';
 import { theme } from '../canvas/theme';
 import { AutocompleteEngine } from './AutocompleteEngine';
 import { AutocompleteUI } from './AutocompleteUI';
@@ -141,6 +142,11 @@ export default class CellEditor {
     this.textarea.style.height = 'auto';
     this.textarea.style.height = this.textarea.scrollHeight + 'px';
 
+    // Emit cell edit change event
+    if (this.isEditing) {
+      rusheet.emitCellEdit(this.currentRow, this.currentCol, this.textarea.value, 'change');
+    }
+
     // Trigger autocomplete with debounce
     if (this.autocompleteEnabled) {
       if (this.autocompleteDebounce !== null) {
@@ -275,6 +281,9 @@ export default class CellEditor {
     // Auto-resize
     this.textarea.style.height = 'auto';
     this.textarea.style.height = this.textarea.scrollHeight + 'px';
+
+    // Emit cell edit start event
+    rusheet.emitCellEdit(row, col, value, 'start');
   }
 
   /**
@@ -298,9 +307,14 @@ export default class CellEditor {
     if (!this.isEditing) return;
 
     const value = this.textarea.value;
+    const row = this.currentRow;
+    const col = this.currentCol;
 
     // Save value via bridge
-    this.bridge.setCellValue(this.currentRow, this.currentCol, value);
+    this.bridge.setCellValue(row, col, value);
+
+    // Emit cell edit end event
+    rusheet.emitCellEdit(row, col, value, 'end');
 
     // Hide editor
     this.hide();
@@ -315,10 +329,16 @@ export default class CellEditor {
   public cancel(): void {
     if (!this.isEditing) return;
 
+    const row = this.currentRow;
+    const col = this.currentCol;
+
     // Restore original value to formula bar
-    const cellData = this.bridge.getCellData(this.currentRow, this.currentCol);
+    const cellData = this.bridge.getCellData(row, col);
     const value = cellData?.formula || cellData?.value || '';
     this.formulaBar.value = value;
+
+    // Emit cell edit cancel event
+    rusheet.emitCellEdit(row, col, value, 'cancel');
 
     // Hide editor
     this.hide();

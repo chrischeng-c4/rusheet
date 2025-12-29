@@ -1,0 +1,204 @@
+import { emitter } from './EventEmitter';
+import * as WasmBridge from './WasmBridge';
+import type { CellData, CellFormat } from '../types';
+
+export interface CellChangeEvent {
+  row: number;
+  col: number;
+  oldValue: string | null;
+  newValue: string | null;
+  source: 'user' | 'api' | 'undo' | 'redo';
+}
+
+export interface SelectionChangeEvent {
+  row: number;
+  col: number;
+  previousRow: number;
+  previousCol: number;
+}
+
+export interface CellEditEvent {
+  row: number;
+  col: number;
+  value: string;
+  phase: 'start' | 'change' | 'end' | 'cancel';
+}
+
+export class RusheetAPI {
+  private static instance: RusheetAPI;
+  private initialized = false;
+  private currentSelection = { row: 0, col: 0 };
+
+  private constructor() {}
+
+  static getInstance(): RusheetAPI {
+    if (!RusheetAPI.instance) {
+      RusheetAPI.instance = new RusheetAPI();
+    }
+    return RusheetAPI.instance;
+  }
+
+  // Initialization
+  async init(): Promise<void> {
+    if (this.initialized) return;
+    await WasmBridge.initWasm();
+    this.initialized = true;
+  }
+
+  // Event subscription
+  onChange(callback: (event: CellChangeEvent) => void): () => void {
+    return emitter.on('change', callback);
+  }
+
+  onSelectionChange(callback: (event: SelectionChangeEvent) => void): () => void {
+    return emitter.on('selectionChange', callback);
+  }
+
+  onCellEdit(callback: (event: CellEditEvent) => void): () => void {
+    return emitter.on('cellEdit', callback);
+  }
+
+  // Cell operations (wrap WasmBridge and emit events)
+  setCellValue(row: number, col: number, value: string, source: 'user' | 'api' = 'api'): [number, number][] {
+    const oldData = WasmBridge.getCellData(row, col);
+    const oldValue = oldData?.value ?? null;
+    const affected = WasmBridge.setCellValue(row, col, value);
+
+    emitter.emit<CellChangeEvent>('change', {
+      row, col, oldValue, newValue: value, source
+    });
+
+    return affected;
+  }
+
+  getCellData(row: number, col: number): CellData | null {
+    return WasmBridge.getCellData(row, col);
+  }
+
+  setCellFormat(row: number, col: number, format: CellFormat): boolean {
+    return WasmBridge.setCellFormat(row, col, format);
+  }
+
+  setRangeFormat(startRow: number, startCol: number, endRow: number, endCol: number, format: CellFormat): boolean {
+    return WasmBridge.setRangeFormat(startRow, startCol, endRow, endCol, format);
+  }
+
+  clearRange(startRow: number, startCol: number, endRow: number, endCol: number): [number, number][] {
+    return WasmBridge.clearRange(startRow, startCol, endRow, endCol);
+  }
+
+  // Selection (emit events)
+  setSelection(row: number, col: number): void {
+    const previous = { ...this.currentSelection };
+    this.currentSelection = { row, col };
+
+    emitter.emit<SelectionChangeEvent>('selectionChange', {
+      row, col,
+      previousRow: previous.row,
+      previousCol: previous.col
+    });
+  }
+
+  getSelection(): { row: number; col: number } {
+    return { ...this.currentSelection };
+  }
+
+  // Emit cell edit events (called by CellEditor)
+  emitCellEdit(row: number, col: number, value: string, phase: CellEditEvent['phase']): void {
+    emitter.emit<CellEditEvent>('cellEdit', { row, col, value, phase });
+  }
+
+  // Batch data loading
+  setData(data: (string | number | null)[][]): void {
+    for (let row = 0; row < data.length; row++) {
+      for (let col = 0; col < data[row].length; col++) {
+        const value = data[row][col];
+        if (value !== null && value !== undefined && value !== '') {
+          WasmBridge.setCellValue(row, col, String(value));
+        }
+      }
+    }
+    emitter.emit('dataLoaded', { rows: data.length });
+  }
+
+  // Get all data as 2D array
+  getData(startRow = 0, endRow = 999, startCol = 0, endCol = 25): (string | null)[][] {
+    const result: (string | null)[][] = [];
+    for (let row = startRow; row <= endRow; row++) {
+      const rowData: (string | null)[] = [];
+      for (let col = startCol; col <= endCol; col++) {
+        const cell = WasmBridge.getCellData(row, col);
+        rowData.push(cell?.value ?? null);
+      }
+      result.push(rowData);
+    }
+    return result;
+  }
+
+  // Undo/Redo (emit events)
+  undo(): [number, number][] {
+    const affected = WasmBridge.undo();
+    affected.forEach(([row, col]) => {
+      const newData = WasmBridge.getCellData(row, col);
+      emitter.emit<CellChangeEvent>('change', {
+        row, col,
+        oldValue: null, // We don't track this for undo
+        newValue: newData?.value ?? null,
+        source: 'undo'
+      });
+    });
+    return affected;
+  }
+
+  redo(): [number, number][] {
+    const affected = WasmBridge.redo();
+    affected.forEach(([row, col]) => {
+      const newData = WasmBridge.getCellData(row, col);
+      emitter.emit<CellChangeEvent>('change', {
+        row, col,
+        oldValue: null,
+        newValue: newData?.value ?? null,
+        source: 'redo'
+      });
+    });
+    return affected;
+  }
+
+  canUndo(): boolean { return WasmBridge.canUndo(); }
+  canRedo(): boolean { return WasmBridge.canRedo(); }
+
+  // Serialization
+  serialize(): string { return WasmBridge.serialize(); }
+  deserialize(json: string): boolean { return WasmBridge.deserialize(json); }
+
+  // Sheet management (pass through)
+  addSheet(name: string): number { return WasmBridge.addSheet(name); }
+  setActiveSheet(index: number): boolean { return WasmBridge.setActiveSheet(index); }
+  getSheetNames(): string[] { return WasmBridge.getSheetNames(); }
+  getActiveSheetIndex(): number { return WasmBridge.getActiveSheetIndex(); }
+  renameSheet(index: number, name: string): boolean { return WasmBridge.renameSheet(index, name); }
+  deleteSheet(index: number): boolean { return WasmBridge.deleteSheet(index); }
+
+  // Row/Col sizing (pass through)
+  setRowHeight(row: number, height: number): void { WasmBridge.setRowHeight(row, height); }
+  setColWidth(col: number, width: number): void { WasmBridge.setColWidth(col, width); }
+  getRowHeight(row: number): number { return WasmBridge.getRowHeight(row); }
+  getColWidth(col: number): number { return WasmBridge.getColWidth(col); }
+
+  // Viewport (pass through)
+  getViewportData(startRow: number, endRow: number, startCol: number, endCol: number) {
+    return WasmBridge.getViewportData(startRow, endRow, startCol, endCol);
+  }
+  getViewportArrays(startRow: number, endRow: number, startCol: number, endCol: number) {
+    return WasmBridge.getViewportArrays(startRow, endRow, startCol, endCol);
+  }
+
+  // Cleanup
+  destroy(): void {
+    emitter.removeAllListeners();
+    this.initialized = false;
+  }
+}
+
+// Export singleton
+export const rusheet = RusheetAPI.getInstance();
