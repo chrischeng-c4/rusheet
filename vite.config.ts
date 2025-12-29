@@ -20,6 +20,23 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: 'jsdom',
+    environment: 'happy-dom',
+    setupFiles: ['./src/__tests__/setup.ts'],
+    pool: 'forks', // Use forks for better WASM support
+    poolOptions: {
+      forks: {
+        singleFork: true, // Run tests in single fork for WASM shared memory
+      },
+    },
+    server: {
+      deps: {
+        inline: ['rusheet-wasm'], // Inline WASM module in tests
+      },
+    },
+  },
+  server: {
+    fs: {
+      allow: ['..'], // Allow serving files from parent directory (for pkg/)
+    },
   },
 });

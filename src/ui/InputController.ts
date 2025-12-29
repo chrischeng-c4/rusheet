@@ -29,6 +29,7 @@ export default class InputController {
 
     // Attach event listeners
     this.attachEventListeners();
+    this.canvas.addEventListener('dblclick', this.handleDoubleClick.bind(this));
   }
 
   /**
@@ -56,6 +57,22 @@ export default class InputController {
 
     // Re-render to show selection
     this.gridRenderer.render();
+  }
+
+  /**
+   * Handle double-click events - activate cell editing
+   */
+  private handleDoubleClick(event: MouseEvent): void {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    const cell = this.gridRenderer.screenToGrid(x, y);
+
+    if (cell) {
+      // Activate editing on double-click
+      this.editModeCallback(cell.row, cell.col);
+    }
   }
 
   /**

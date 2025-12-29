@@ -158,18 +158,21 @@ export default class CellEditor {
    * Handle textarea blur events
    */
   private handleTextareaBlur(event: FocusEvent): void {
-    // Don't commit if focus moved to formula bar
+    // Don't commit if focus moved to formula bar or autocomplete dropdown
     const relatedTarget = event.relatedTarget as HTMLElement;
     if (relatedTarget === this.formulaBar) {
       return;
     }
 
-    // Delay to allow click events to process
-    setTimeout(() => {
-      if (this.isEditing) {
-        this.commit();
-      }
-    }, 100);
+    // Check if focus moved to autocomplete dropdown
+    if (relatedTarget && relatedTarget.closest('.autocomplete-dropdown')) {
+      return;
+    }
+
+    // Commit immediately instead of with delay
+    if (this.isEditing) {
+      this.commit();
+    }
   }
 
   /**
@@ -251,7 +254,9 @@ export default class CellEditor {
     this.currentCol = col;
     this.isEditing = true;
 
-    // Get current cell value
+    // Get current cell value for editing
+    // For formulas: show the formula expression (e.g., "=SUM(A1:B10)")
+    // For regular values: show the original input (e.g., "10", "Hello")
     const cellData = this.bridge.getCellData(row, col);
     const value = cellData?.formula || cellData?.value || '';
 
@@ -299,6 +304,9 @@ export default class CellEditor {
 
     // Hide editor
     this.hide();
+
+    // NEW: Trigger re-render to show the updated value
+    this.renderer.render();
   }
 
   /**
