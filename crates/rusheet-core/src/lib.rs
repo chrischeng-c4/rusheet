@@ -16,7 +16,7 @@ pub use format::{CellFormat, Color, HorizontalAlign, VerticalAlign};
 pub use gap_buffer::GapBuffer;
 pub use range::{col_from_label, col_to_label, CellCoord, CellRange};
 pub use sheet::{parse_cell_input, Sheet};
-pub use spatial::{FenwickTree, SpatialIndex};
+pub use spatial::{morton_decode, morton_encode, FenwickTree, SpatialIndex};
 pub use state::{
     CellPosition, ClipboardState, EditState, InputAction, Selection, SpreadsheetState,
     ViewportState,

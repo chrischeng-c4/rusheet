@@ -3,6 +3,7 @@ import type { CellData, CellFormat } from '../types';
 // Dynamic import for WASM module
 let wasmModule: typeof import('../../pkg/rusheet_wasm') | null = null;
 let engine: InstanceType<typeof import('../../pkg/rusheet_wasm').SpreadsheetEngine> | null = null;
+let wasmMemory: WebAssembly.Memory | null = null;
 
 export async function initWasm(): Promise<void> {
   if (wasmModule) return;
@@ -11,6 +12,9 @@ export async function initWasm(): Promise<void> {
     wasmModule = await import('../../pkg/rusheet_wasm');
     await wasmModule.default();
     engine = new wasmModule.SpreadsheetEngine();
+    // Get WASM memory for zero-copy access
+    // @ts-expect-error - memory is exported but not in types
+    wasmMemory = wasmModule.memory;
   } catch (error) {
     console.error('Failed to load WASM module:', error);
     throw error;
@@ -143,4 +147,120 @@ export function deserialize(json: string): boolean {
 
 export function recalculateAll(): void {
   getEngine().recalculateAll();
+}
+
+// =============================================================================
+// Zero-Copy Viewport API
+// =============================================================================
+
+/**
+ * Viewport data from zero-copy buffer.
+ * Provides direct access to WASM memory through TypedArrays.
+ */
+export interface ViewportArrays {
+  /** Row indices for each cell */
+  rows: Uint32Array;
+  /** Column indices for each cell */
+  cols: Uint32Array;
+  /** Numeric values (NaN for non-numeric) */
+  values: Float64Array;
+  /** Packed format flags */
+  formats: Uint32Array;
+  /** Display strings (still JSON) */
+  displayValues: string[];
+  /** Number of cells */
+  length: number;
+}
+
+/**
+ * Populate the viewport buffer and get zero-copy access to the data.
+ * This is much faster than getViewportData() for large viewports.
+ *
+ * @param startRow - Starting row (inclusive)
+ * @param endRow - Ending row (inclusive)
+ * @param startCol - Starting column (inclusive)
+ * @param endCol - Ending column (inclusive)
+ * @returns ViewportArrays with direct memory access
+ */
+export function getViewportArrays(
+  startRow: number,
+  endRow: number,
+  startCol: number,
+  endCol: number
+): ViewportArrays {
+  const eng = getEngine();
+
+  // Populate the buffer
+  eng.populateViewport(startRow, endRow, startCol, endCol);
+
+  const len = eng.getViewportLen();
+
+  if (len === 0 || !wasmMemory) {
+    return {
+      rows: new Uint32Array(0),
+      cols: new Uint32Array(0),
+      values: new Float64Array(0),
+      formats: new Uint32Array(0),
+      displayValues: [],
+      length: 0,
+    };
+  }
+
+  // Get pointers
+  const rowsPtr = eng.getViewportRowsPtr();
+  const colsPtr = eng.getViewportColsPtr();
+  const valuesPtr = eng.getViewportValuesPtr();
+  const formatsPtr = eng.getViewportFormatsPtr();
+
+  // Create views into WASM memory (zero-copy!)
+  const rows = new Uint32Array(wasmMemory.buffer, rowsPtr, len);
+  const cols = new Uint32Array(wasmMemory.buffer, colsPtr, len);
+  const values = new Float64Array(wasmMemory.buffer, valuesPtr, len);
+  const formats = new Uint32Array(wasmMemory.buffer, formatsPtr, len);
+
+  // Display values still need JSON parsing
+  const displayValues: string[] = JSON.parse(eng.getViewportDisplayValues());
+
+  return {
+    rows,
+    cols,
+    values,
+    formats,
+    displayValues,
+    length: len,
+  };
+}
+
+/**
+ * Unpack format flags into individual properties.
+ *
+ * @param flags - Packed format flags from formats array
+ * @returns Object with individual format properties
+ */
+export function unpackFormatFlags(flags: number): {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  fontSize: number;
+  horizontalAlign: 'left' | 'center' | 'right';
+  verticalAlign: 'middle' | 'top' | 'bottom';
+} {
+  const bold = (flags & (1 << 0)) !== 0;
+  const italic = (flags & (1 << 1)) !== 0;
+  const underline = (flags & (1 << 2)) !== 0;
+  const fontSize = (flags >> 8) & 0xff;
+  const hAlign = (flags >> 16) & 0x7;
+  const vAlign = (flags >> 19) & 0x7;
+
+  const horizontalAlignMap = ['left', 'center', 'right'] as const;
+  const verticalAlignMap = ['middle', 'top', 'bottom'] as const;
+
+  return {
+    bold,
+    italic,
+    underline,
+    fontSize,
+    horizontalAlign: horizontalAlignMap[hAlign] || 'left',
+    verticalAlign: verticalAlignMap[vAlign] || 'middle',
+  };
 }

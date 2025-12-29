@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
+import { playwright } from '@vitest/browser-playwright';
 
 export default defineConfig({
   plugins: [
@@ -20,17 +21,20 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: 'happy-dom',
-    setupFiles: ['./src/__tests__/setup.ts'],
-    pool: 'forks',
-    isolate: false,
+    include: ['**/*.integration.test.ts'],
+    browser: {
+      enabled: true,
+      provider: playwright(),
+      instances: [{ browser: 'chromium' }],
+      headless: true,
+    },
     deps: {
       inline: ['rusheet-wasm'],
     },
   },
   server: {
     fs: {
-      allow: ['..'], // Allow serving files from parent directory (for pkg/)
+      allow: ['..'],
     },
   },
 });

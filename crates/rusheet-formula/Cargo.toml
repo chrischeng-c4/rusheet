@@ -10,3 +10,4 @@ description = "Formula parsing and evaluation engine for RuSheet"
 rusheet-core = { path = "../rusheet-core" }
 serde.workspace = true
 thiserror.workspace = true
+nom = "7.1"

@@ -4,33 +4,27 @@ pub mod evaluator;
 pub mod functions;
 pub mod lexer;
 pub mod parser;
+pub mod parser_nom;
 
 pub use ast::{BinaryOp, Expr, UnaryOp};
 pub use dependency::DependencyGraph;
 pub use evaluator::Evaluator;
 pub use lexer::{Lexer, Token};
 pub use parser::Parser;
+pub use parser_nom::NomParser;
 
 use rusheet_core::{CellError, CellValue};
 
 /// Parse and evaluate a formula expression
+///
+/// Uses the nom-based parser for robust parsing.
 pub fn evaluate_formula(
     expression: &str,
     get_cell_value: impl Fn(u32, u32) -> CellValue,
 ) -> CellValue {
-    // Skip the leading '=' if present
-    let expr_str = expression.strip_prefix('=').unwrap_or(expression);
-
-    // Lexer
-    let mut lexer = Lexer::new(expr_str);
-    let tokens = match lexer.tokenize() {
-        Ok(tokens) => tokens,
-        Err(_) => return CellValue::Error(CellError::InvalidValue),
-    };
-
-    // Parser
-    let mut parser = Parser::new(tokens);
-    let ast = match parser.parse() {
+    // Use the nom parser
+    let parser = NomParser::new();
+    let ast = match parser.parse(expression) {
         Ok(ast) => ast,
         Err(_) => return CellValue::Error(CellError::InvalidValue),
     };
@@ -41,17 +35,11 @@ pub fn evaluate_formula(
 }
 
 /// Extract cell references from a formula expression
+///
+/// Uses the nom-based parser for robust parsing.
 pub fn extract_references(expression: &str) -> Vec<(u32, u32)> {
-    let expr_str = expression.strip_prefix('=').unwrap_or(expression);
-
-    let mut lexer = Lexer::new(expr_str);
-    let tokens = match lexer.tokenize() {
-        Ok(tokens) => tokens,
-        Err(_) => return vec![],
-    };
-
-    let mut parser = Parser::new(tokens);
-    let ast = match parser.parse() {
+    let parser = NomParser::new();
+    let ast = match parser.parse(expression) {
         Ok(ast) => ast,
         Err(_) => return vec![],
     };

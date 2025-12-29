@@ -1,4 +1,4 @@
-import GridRenderer from '../canvas/GridRenderer';
+import type { IGridRenderer } from '../types/renderer';
 import * as WasmBridge from '../core/WasmBridge';
 import { theme } from '../canvas/theme';
 import { AutocompleteEngine } from './AutocompleteEngine';
@@ -6,7 +6,7 @@ import { AutocompleteUI } from './AutocompleteUI';
 
 export default class CellEditor {
   private container: HTMLElement;
-  private renderer: GridRenderer;
+  private renderer: IGridRenderer;
   private bridge: typeof WasmBridge;
   private formulaBar: HTMLInputElement;
   private textarea: HTMLTextAreaElement;
@@ -21,7 +21,7 @@ export default class CellEditor {
 
   constructor(
     container: HTMLElement,
-    renderer: GridRenderer,
+    renderer: IGridRenderer,
     bridge: typeof WasmBridge,
     formulaBar: HTMLInputElement
   ) {

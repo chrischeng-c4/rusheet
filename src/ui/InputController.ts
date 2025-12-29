@@ -1,11 +1,11 @@
-import GridRenderer from '../canvas/GridRenderer';
+import type { IGridRenderer } from '../types/renderer';
 import * as WasmBridge from '../core/WasmBridge';
 
 type EditModeCallback = (row: number, col: number) => void;
 
 export default class InputController {
   private canvas: HTMLCanvasElement;
-  private gridRenderer: GridRenderer;
+  private gridRenderer: IGridRenderer;
   private editModeCallback: EditModeCallback;
 
   // Event handler references for cleanup
@@ -15,7 +15,7 @@ export default class InputController {
 
   constructor(
     canvas: HTMLCanvasElement,
-    gridRenderer: GridRenderer,
+    gridRenderer: IGridRenderer,
     editModeCallback: EditModeCallback
   ) {
     this.canvas = canvas;

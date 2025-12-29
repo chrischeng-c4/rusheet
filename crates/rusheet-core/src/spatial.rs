@@ -659,3 +659,179 @@ mod tests {
         assert_eq!(tree.prefix_sum(7), 35.0);
     }
 }
+
+// ============================================================================
+// Morton Encoding (Z-order curve) for cache-friendly chunk storage
+// ============================================================================
+
+/// Spread a 6-bit value to 12 bits for Morton encoding.
+///
+/// Uses the "Magic Number" bit-spreading approach.
+/// Input: 0b00abcdef (6 bits)
+/// Output: 0b0a0b0c0d0e0f (12 bits with gaps)
+#[inline]
+fn spread_bits(mut x: u16) -> u16 {
+    // x = 0b0000_0000_00ab_cdef (6 bits in positions 0-5)
+    x = (x | (x << 8)) & 0x00FF;  // 0b0000_0000_00ab_cdef (no change for 6 bits)
+    x = (x | (x << 4)) & 0x0F0F;  // 0b0000_00ab_0000_cdef
+    x = (x | (x << 2)) & 0x3333;  // 0b00_0a_0b_00_0c_0d_0e_0f -> 0b0000_0a0b_0000_cdef
+    x = (x | (x << 1)) & 0x5555;  // 0b0a_0b_0c_0d_0e_0f
+    x
+}
+
+/// Encode a 2D coordinate (row, col) into a 1D Morton code (Z-order).
+///
+/// This interleaves the bits of row and col to create a single index that
+/// preserves 2D spatial locality. Cells that are close in 2D space will
+/// have close Morton codes, improving cache performance for range queries.
+///
+/// # Arguments
+///
+/// * `row` - Row coordinate within chunk (0-63)
+/// * `col` - Column coordinate within chunk (0-63)
+///
+/// # Returns
+///
+/// A 12-bit Morton code (0-4095) suitable for indexing a 64x64 chunk.
+///
+/// # Examples
+///
+/// ```
+/// use rusheet_core::spatial::morton_encode;
+///
+/// assert_eq!(morton_encode(0, 0), 0);
+/// assert_eq!(morton_encode(0, 1), 1);
+/// assert_eq!(morton_encode(1, 0), 2);
+/// assert_eq!(morton_encode(1, 1), 3);
+/// assert_eq!(morton_encode(63, 63), 4095);
+/// ```
+#[inline]
+pub fn morton_encode(row: u8, col: u8) -> u16 {
+    let row = (row & 0x3F) as u16; // Mask to 6 bits (0-63)
+    let col = (col & 0x3F) as u16; // Mask to 6 bits (0-63)
+
+    // Interleave: col bits go to odd positions, row bits go to even positions
+    // Result: r5c5r4c4r3c3r2c2r1c1r0c0
+    (spread_bits(row) << 1) | spread_bits(col)
+}
+
+/// Decode a Morton code back to 2D coordinates.
+///
+/// # Arguments
+///
+/// * `code` - A 12-bit Morton code (0-4095)
+///
+/// # Returns
+///
+/// A tuple of (row, col) coordinates within the chunk (0-63 each).
+#[inline]
+pub fn morton_decode(code: u16) -> (u8, u8) {
+    let col = compact_bits(code);
+    let row = compact_bits(code >> 1);
+    (row as u8, col as u8)
+}
+
+/// Compact interleaved bits back to consecutive bits.
+#[inline]
+fn compact_bits(mut x: u16) -> u16 {
+    x &= 0x5555; // Keep only even bits
+    x = (x | (x >> 1)) & 0x3333;
+    x = (x | (x >> 2)) & 0x0F0F;
+    x = (x | (x >> 4)) & 0x00FF;
+    x & 0x3F // Mask to 6 bits
+}
+
+#[cfg(test)]
+mod morton_tests {
+    use super::*;
+
+    #[test]
+    fn test_morton_encode_corners() {
+        // (0, 0) -> 0
+        assert_eq!(morton_encode(0, 0), 0);
+
+        // (0, 1) -> 1 (col bit at position 0)
+        assert_eq!(morton_encode(0, 1), 1);
+
+        // (1, 0) -> 2 (row bit at position 1)
+        assert_eq!(morton_encode(1, 0), 2);
+
+        // (1, 1) -> 3
+        assert_eq!(morton_encode(1, 1), 3);
+
+        // (63, 63) -> 4095 (all bits set)
+        assert_eq!(morton_encode(63, 63), 4095);
+    }
+
+    #[test]
+    fn test_morton_encode_pattern() {
+        // Test Z-order pattern
+        assert_eq!(morton_encode(0, 2), 4);
+        assert_eq!(morton_encode(0, 3), 5);
+        assert_eq!(morton_encode(1, 2), 6);
+        assert_eq!(morton_encode(1, 3), 7);
+        assert_eq!(morton_encode(2, 0), 8);
+        assert_eq!(morton_encode(2, 1), 9);
+        assert_eq!(morton_encode(3, 0), 10);
+        assert_eq!(morton_encode(3, 1), 11);
+    }
+
+    #[test]
+    fn test_morton_encode_decode_roundtrip() {
+        // Test all coordinates round-trip correctly
+        for row in 0..64u8 {
+            for col in 0..64u8 {
+                let code = morton_encode(row, col);
+                let (decoded_row, decoded_col) = morton_decode(code);
+                assert_eq!(
+                    (decoded_row, decoded_col),
+                    (row, col),
+                    "Roundtrip failed for ({}, {})",
+                    row,
+                    col
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_morton_code_range() {
+        // All codes should be in range [0, 4095]
+        for row in 0..64u8 {
+            for col in 0..64u8 {
+                let code = morton_encode(row, col);
+                assert!(code < 4096, "Code {} out of range for ({}, {})", code, row, col);
+            }
+        }
+    }
+
+    #[test]
+    fn test_morton_unique() {
+        // All coordinate pairs should produce unique codes
+        let mut seen = vec![false; 4096];
+        for row in 0..64u8 {
+            for col in 0..64u8 {
+                let code = morton_encode(row, col) as usize;
+                assert!(!seen[code], "Duplicate code {} for ({}, {})", code, row, col);
+                seen[code] = true;
+            }
+        }
+        // All codes should be used
+        assert!(seen.iter().all(|&x| x), "Not all codes used");
+    }
+
+    #[test]
+    fn test_morton_locality() {
+        // Adjacent cells should have close Morton codes
+        let c00 = morton_encode(0, 0);
+        let c01 = morton_encode(0, 1);
+        let c10 = morton_encode(1, 0);
+        let c11 = morton_encode(1, 1);
+
+        // All should be in the first 4 codes
+        assert!(c00 < 4);
+        assert!(c01 < 4);
+        assert!(c10 < 4);
+        assert!(c11 < 4);
+    }
+}

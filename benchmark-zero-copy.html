@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Rusheet Zero-Copy Benchmark</title>
+  <style>
+    body { font-family: monospace; padding: 20px; }
+    .result { margin: 10px 0; }
+    .fast { color: green; }
+    .slow { color: red; }
+    button { padding: 10px 20px; font-size: 16px; margin: 10px 5px; }
+    #output { white-space: pre; background: #f5f5f5; padding: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Rusheet Zero-Copy Performance Benchmark</h1>
+  <p>Compares JSON-based getViewportData() vs zero-copy getViewportArrays()</p>
+
+  <button id="run1k">Run 1K cells</button>
+  <button id="run10k">Run 10K cells</button>
+  <button id="run100k">Run 100K cells</button>
+
+  <div id="output">Click a button to run benchmark...</div>
+
+  <script type="module">
+    import init, { SpreadsheetEngine } from './pkg/rusheet_wasm.js';
+
+    let engine;
+    let wasmMemory;
+
+    async function setup() {
+      const wasm = await init();
+      wasmMemory = wasm.memory;
+      engine = new SpreadsheetEngine();
+      console.log('WASM initialized');
+    }
+
+    function populateGrid(rows, cols) {
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          engine.setCellValue(r, c, String((r + 1) * (c + 1)));
+        }
+      }
+    }
+
+    function benchmarkJSON(endRow, endCol, iterations = 100) {
+      const times = [];
+      for (let i = 0; i < iterations; i++) {
+        const start = performance.now();
+        const json = engine.getViewportData(0, endRow, 0, endCol);
+        const data = JSON.parse(json);
+        times.push(performance.now() - start);
+      }
+      return {
+        avg: times.reduce((a, b) => a + b) / times.length,
+        min: Math.min(...times),
+        max: Math.max(...times)
+      };
+    }
+
+    function benchmarkZeroCopy(endRow, endCol, iterations = 100) {
+      const times = [];
+      for (let i = 0; i < iterations; i++) {
+        const start = performance.now();
+
+        // Populate buffer
+        engine.populateViewport(0, endRow, 0, endCol);
+
+        const len = engine.getViewportLen();
+        if (len > 0 && wasmMemory) {
+          // Zero-copy access
+          const rowsPtr = engine.getViewportRowsPtr();
+          const colsPtr = engine.getViewportColsPtr();
+          const valuesPtr = engine.getViewportValuesPtr();
+          const formatsPtr = engine.getViewportFormatsPtr();
+
+          const rows = new Uint32Array(wasmMemory.buffer, rowsPtr, len);
+          const cols = new Uint32Array(wasmMemory.buffer, colsPtr, len);
+          const values = new Float64Array(wasmMemory.buffer, valuesPtr, len);
+          const formats = new Uint32Array(wasmMemory.buffer, formatsPtr, len);
+
+          // Display values still need JSON (strings)
+          const displayValues = JSON.parse(engine.getViewportDisplayValues());
+        }
+
+        times.push(performance.now() - start);
+      }
+      return {
+        avg: times.reduce((a, b) => a + b) / times.length,
+        min: Math.min(...times),
+        max: Math.max(...times)
+      };
+    }
+
+    async function runBenchmark(cellCount) {
+      const output = document.getElementById('output');
+      output.textContent = `Preparing ${cellCount} cells...\n`;
+
+      // Reset engine
+      engine = new SpreadsheetEngine();
+
+      // Calculate grid dimensions (roughly square)
+      const rows = Math.ceil(Math.sqrt(cellCount));
+      const cols = Math.ceil(cellCount / rows);
+
+      output.textContent += `Grid: ${rows} x ${cols} = ${rows * cols} cells\n`;
+      output.textContent += `Populating grid...\n`;
+
+      const populateStart = performance.now();
+      populateGrid(rows, cols);
+      output.textContent += `Population time: ${(performance.now() - populateStart).toFixed(1)}ms\n\n`;
+
+      output.textContent += `Running JSON benchmark (100 iterations)...\n`;
+      await new Promise(r => setTimeout(r, 10)); // Allow UI update
+      const jsonResult = benchmarkJSON(rows - 1, cols - 1);
+
+      output.textContent += `Running Zero-Copy benchmark (100 iterations)...\n`;
+      await new Promise(r => setTimeout(r, 10)); // Allow UI update
+      const zeroCopyResult = benchmarkZeroCopy(rows - 1, cols - 1);
+
+      const speedup = jsonResult.avg / zeroCopyResult.avg;
+
+      output.textContent += `\n${'='.repeat(50)}\n`;
+      output.textContent += `RESULTS for ${rows * cols} cells:\n`;
+      output.textContent += `${'='.repeat(50)}\n\n`;
+
+      output.textContent += `JSON (getViewportData):\n`;
+      output.textContent += `  Average: ${jsonResult.avg.toFixed(3)}ms\n`;
+      output.textContent += `  Min: ${jsonResult.min.toFixed(3)}ms\n`;
+      output.textContent += `  Max: ${jsonResult.max.toFixed(3)}ms\n\n`;
+
+      output.textContent += `Zero-Copy (getViewportArrays):\n`;
+      output.textContent += `  Average: ${zeroCopyResult.avg.toFixed(3)}ms\n`;
+      output.textContent += `  Min: ${zeroCopyResult.min.toFixed(3)}ms\n`;
+      output.textContent += `  Max: ${zeroCopyResult.max.toFixed(3)}ms\n\n`;
+
+      output.textContent += `${'='.repeat(50)}\n`;
+      output.textContent += `SPEEDUP: ${speedup.toFixed(2)}x faster\n`;
+      output.textContent += `${'='.repeat(50)}\n`;
+
+      if (zeroCopyResult.avg < 1) {
+        output.textContent += `\n✓ Target achieved: Zero-copy < 1ms\n`;
+      }
+    }
+
+    await setup();
+
+    document.getElementById('run1k').addEventListener('click', () => runBenchmark(1000));
+    document.getElementById('run10k').addEventListener('click', () => runBenchmark(10000));
+    document.getElementById('run100k').addEventListener('click', () => runBenchmark(100000));
+  </script>
+</body>
+</html>

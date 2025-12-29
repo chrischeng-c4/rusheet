@@ -4,9 +4,14 @@ import './styles/main.css';
 // Import core modules
 import * as WasmBridge from './core/WasmBridge';
 import GridRenderer from './canvas/GridRenderer';
+import { RenderController, isOffscreenCanvasSupported } from './worker';
+import type { IGridRenderer } from './types/renderer';
 import InputController from './ui/InputController';
 import CellEditor from './ui/CellEditor';
 import { PersistenceManager } from './core/PersistenceManager';
+
+// Configuration: Set to true to use OffscreenCanvas worker rendering
+const USE_OFFSCREEN_CANVAS = false; // Set to true to enable worker-based rendering
 
 /**
  * Convert column index to Excel-style letter notation
@@ -58,9 +63,28 @@ async function main(): Promise<void> {
     }
     console.log('[RuSheet] DOM elements found');
 
-    // Step 3: Create GridRenderer
+    // Step 3: Create GridRenderer (or RenderController for offscreen mode)
     console.log('[RuSheet] Creating grid renderer...');
-    const renderer = new GridRenderer(canvas);
+    let renderer: IGridRenderer;
+
+    const useOffscreen = USE_OFFSCREEN_CANVAS && isOffscreenCanvasSupported();
+    if (useOffscreen) {
+      console.log('[RuSheet] Using OffscreenCanvas worker rendering');
+      renderer = new RenderController(canvas, {
+        onReady: () => {
+          console.log('[RuSheet] Render worker ready');
+          renderer.render();
+        },
+        onError: (msg) => {
+          console.error('[RuSheet] Render worker error:', msg);
+        },
+      });
+    } else {
+      if (USE_OFFSCREEN_CANVAS) {
+        console.log('[RuSheet] OffscreenCanvas not supported, falling back to direct rendering');
+      }
+      renderer = new GridRenderer(canvas);
+    }
 
     // Step 4: Create CellEditor
     console.log('[RuSheet] Creating cell editor...');
@@ -102,19 +126,23 @@ async function main(): Promise<void> {
     // Step 7: Update cell address display when selection changes
     console.log('[RuSheet] Setting up cell selection tracking...');
 
-    // Create a render wrapper to update cell address
-    const originalRender = renderer.render.bind(renderer);
-    renderer.render = function() {
-      originalRender();
+    // Helper to update cell address display
+    const updateCellAddressDisplay = () => {
       const activeCell = renderer.getActiveCell();
       cellAddress.textContent = `${colToLetter(activeCell.col)}${activeCell.row + 1}`;
+    };
+
+    // Create a render wrapper to update cell address
+    const renderWithAddressUpdate = () => {
+      renderer.render();
+      updateCellAddressDisplay();
     };
 
     // Set callback for cell editor to update address when moving cells
     cellEditor.setCellChangeCallback((row: number, col: number) => {
       cellAddress.textContent = `${colToLetter(col)}${row + 1}`;
       persistence.scheduleSave(); // Auto-save after edit
-      renderer.render();
+      renderWithAddressUpdate();
     });
 
     // Step 8: Set up add sheet button
@@ -144,7 +172,7 @@ async function main(): Promise<void> {
       WasmBridge.setActiveSheet(newIndex);
 
       sheetCounter++;
-      renderer.render();
+      renderWithAddressUpdate();
     });
 
     // Set up sheet tab click handlers
@@ -163,7 +191,7 @@ async function main(): Promise<void> {
         WasmBridge.setActiveSheet(index);
 
         console.log(`[RuSheet] Switched to sheet index ${index}`);
-        renderer.render();
+        renderWithAddressUpdate();
       }
     });
 
@@ -188,7 +216,7 @@ async function main(): Promise<void> {
       loadBtn.addEventListener('click', () => {
         if (persistence.load()) {
           alert('Workbook loaded successfully!');
-          renderer.render();
+          renderWithAddressUpdate();
         } else {
           alert('No saved workbook found or load failed');
         }
@@ -211,7 +239,7 @@ async function main(): Promise<void> {
           persistence.importFromFile(file, (success) => {
             if (success) {
               alert('Workbook imported successfully!');
-              renderer.render();
+              renderWithAddressUpdate();
             } else {
               alert('Failed to import workbook');
             }
@@ -287,7 +315,7 @@ async function main(): Promise<void> {
 
     // Step 10: Initial render
     console.log('[RuSheet] Performing initial render...');
-    renderer.render();
+    renderWithAddressUpdate();
 
     console.log('[RuSheet] Application initialized successfully!');
     console.log('[RuSheet] Ready to use');

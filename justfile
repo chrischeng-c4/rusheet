@@ -45,6 +45,17 @@ rebuild: clean install build
 test-rust:
     cargo test --workspace
 
+# Run unit tests (no WASM required)
+test-unit:
+    pnpm vitest run --exclude '**/*.integration.test.ts'
+
+# Run integration tests (browser mode, real WASM)
+test-integration:
+    pnpm vitest run --config vite.config.browser.ts
+
+# Run all tests
+test-all: test-rust test-unit test-integration
+
 # Format Rust code
 fmt:
     cargo fmt --all

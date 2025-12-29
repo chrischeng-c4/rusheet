@@ -1,23 +1,17 @@
 import { theme } from './theme';
 import type { CellData as _CellData } from '../types';
+import type { IGridRenderer, Point, CellPosition } from '../types/renderer';
 import * as WasmBridge from '../core/WasmBridge';
 
-interface Point {
-  x: number;
-  y: number;
-}
+// Configuration: Use zero-copy API for viewport data (faster for large viewports)
+const USE_ZERO_COPY_VIEWPORT = true;
 
 interface Size {
   width: number;
   height: number;
 }
 
-interface CellPosition {
-  row: number;
-  col: number;
-}
-
-export default class GridRenderer {
+export default class GridRenderer implements IGridRenderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private scrollOffset: Point = { x: 0, y: 0 };
@@ -220,7 +214,7 @@ export default class GridRenderer {
   }
 
   /**
-   * Render cell content
+   * Render cell content using zero-copy API for better performance
    */
   private renderCellContent(range: {
     startRow: number;
@@ -229,76 +223,150 @@ export default class GridRenderer {
     endCol: number;
   }): void {
     const ctx = this.ctx;
-    const cellsData = WasmBridge.getViewportData(
-      range.startRow,
-      range.endRow,
-      range.startCol,
-      range.endCol
-    );
 
-    for (const cellData of cellsData) {
-      if (!cellData.display_value) continue;
+    if (USE_ZERO_COPY_VIEWPORT) {
+      // Use zero-copy API for better performance with large viewports
+      const viewport = WasmBridge.getViewportArrays(
+        range.startRow,
+        range.endRow,
+        range.startCol,
+        range.endCol
+      );
 
-      const { row, col } = cellData;
-      const pos = this.gridToScreen(row, col);
-      const colWidth = WasmBridge.getColWidth(col);
-      const rowHeight = WasmBridge.getRowHeight(row);
+      for (let i = 0; i < viewport.length; i++) {
+        const displayValue = viewport.displayValues[i];
+        if (!displayValue) continue;
 
-      // Apply cell background color if set
-      if (cellData.format.background_color) {
-        ctx.fillStyle = cellData.format.background_color;
-        ctx.fillRect(pos.x, pos.y, colWidth, rowHeight);
-      }
+        const row = viewport.rows[i];
+        const col = viewport.cols[i];
+        const formatFlags = viewport.formats[i];
+        const format = WasmBridge.unpackFormatFlags(formatFlags);
 
-      // Set up text rendering
-      let fontStyle = '';
-      if (cellData.format.bold) fontStyle += 'bold ';
-      if (cellData.format.italic) fontStyle += 'italic ';
-      ctx.font = fontStyle + theme.cellFont;
-      ctx.fillStyle = cellData.format.text_color || theme.cellTextColor;
-      ctx.textBaseline = 'top';
+        const pos = this.gridToScreen(row, col);
+        const colWidth = WasmBridge.getColWidth(col);
+        const rowHeight = WasmBridge.getRowHeight(row);
 
-      // Horizontal alignment
-      let textX = pos.x + theme.cellPadding;
-      const horizontalAlign = cellData.format.horizontal_align || 'left';
-      const metrics = ctx.measureText(cellData.display_value);
-      const textWidth = metrics.width;
+        // Set up text rendering
+        let fontStyle = '';
+        if (format.bold) fontStyle += 'bold ';
+        if (format.italic) fontStyle += 'italic ';
+        ctx.font = fontStyle + theme.cellFont;
+        ctx.fillStyle = theme.cellTextColor;
+        ctx.textBaseline = 'top';
 
-      if (horizontalAlign === 'center') {
-        textX = pos.x + (colWidth - textWidth) / 2;
-      } else if (horizontalAlign === 'right') {
-        textX = pos.x + colWidth - textWidth - theme.cellPadding;
-      }
+        // Horizontal alignment
+        let textX = pos.x + theme.cellPadding;
+        const metrics = ctx.measureText(displayValue);
+        const textWidth = metrics.width;
 
-      // Vertical alignment
-      let textY = pos.y + theme.cellPadding;
-      const verticalAlign = cellData.format.vertical_align || 'top';
+        if (format.horizontalAlign === 'center') {
+          textX = pos.x + (colWidth - textWidth) / 2;
+        } else if (format.horizontalAlign === 'right') {
+          textX = pos.x + colWidth - textWidth - theme.cellPadding;
+        }
 
-      if (verticalAlign === 'middle') {
-        textY = pos.y + (rowHeight - 13) / 2; // 13 is approximate font height
-      } else if (verticalAlign === 'bottom') {
-        textY = pos.y + rowHeight - 13 - theme.cellPadding;
-      }
+        // Vertical alignment
+        let textY = pos.y + theme.cellPadding;
+        if (format.verticalAlign === 'middle') {
+          textY = pos.y + (rowHeight - 13) / 2;
+        } else if (format.verticalAlign === 'bottom') {
+          textY = pos.y + rowHeight - 13 - theme.cellPadding;
+        }
 
-      // Clip text to cell bounds
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(pos.x, pos.y, colWidth, rowHeight);
-      ctx.clip();
-
-      // Draw text with underline if needed
-      ctx.fillText(cellData.display_value, textX, textY);
-
-      if (cellData.format.underline) {
-        ctx.strokeStyle = cellData.format.text_color || theme.cellTextColor;
-        ctx.lineWidth = 1;
+        // Clip text to cell bounds
+        ctx.save();
         ctx.beginPath();
-        ctx.moveTo(textX, textY + 14);
-        ctx.lineTo(textX + textWidth, textY + 14);
-        ctx.stroke();
-      }
+        ctx.rect(pos.x, pos.y, colWidth, rowHeight);
+        ctx.clip();
 
-      ctx.restore();
+        // Draw text
+        ctx.fillText(displayValue, textX, textY);
+
+        // Draw underline if needed
+        if (format.underline) {
+          ctx.strokeStyle = theme.cellTextColor;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(textX, textY + 14);
+          ctx.lineTo(textX + textWidth, textY + 14);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      }
+    } else {
+      // Fallback to JSON-based API
+      const cellsData = WasmBridge.getViewportData(
+        range.startRow,
+        range.endRow,
+        range.startCol,
+        range.endCol
+      );
+
+      for (const cellData of cellsData) {
+        if (!cellData.display_value) continue;
+
+        const { row, col } = cellData;
+        const pos = this.gridToScreen(row, col);
+        const colWidth = WasmBridge.getColWidth(col);
+        const rowHeight = WasmBridge.getRowHeight(row);
+
+        // Apply cell background color if set
+        if (cellData.format.background_color) {
+          ctx.fillStyle = cellData.format.background_color;
+          ctx.fillRect(pos.x, pos.y, colWidth, rowHeight);
+        }
+
+        // Set up text rendering
+        let fontStyle = '';
+        if (cellData.format.bold) fontStyle += 'bold ';
+        if (cellData.format.italic) fontStyle += 'italic ';
+        ctx.font = fontStyle + theme.cellFont;
+        ctx.fillStyle = cellData.format.text_color || theme.cellTextColor;
+        ctx.textBaseline = 'top';
+
+        // Horizontal alignment
+        let textX = pos.x + theme.cellPadding;
+        const horizontalAlign = cellData.format.horizontal_align || 'left';
+        const metrics = ctx.measureText(cellData.display_value);
+        const textWidth = metrics.width;
+
+        if (horizontalAlign === 'center') {
+          textX = pos.x + (colWidth - textWidth) / 2;
+        } else if (horizontalAlign === 'right') {
+          textX = pos.x + colWidth - textWidth - theme.cellPadding;
+        }
+
+        // Vertical alignment
+        let textY = pos.y + theme.cellPadding;
+        const verticalAlign = cellData.format.vertical_align || 'top';
+
+        if (verticalAlign === 'middle') {
+          textY = pos.y + (rowHeight - 13) / 2;
+        } else if (verticalAlign === 'bottom') {
+          textY = pos.y + rowHeight - 13 - theme.cellPadding;
+        }
+
+        // Clip text to cell bounds
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(pos.x, pos.y, colWidth, rowHeight);
+        ctx.clip();
+
+        // Draw text with underline if needed
+        ctx.fillText(cellData.display_value, textX, textY);
+
+        if (cellData.format.underline) {
+          ctx.strokeStyle = cellData.format.text_color || theme.cellTextColor;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(textX, textY + 14);
+          ctx.lineTo(textX + textWidth, textY + 14);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      }
     }
   }
 

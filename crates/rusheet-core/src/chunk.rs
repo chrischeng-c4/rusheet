@@ -2,61 +2,78 @@
 //!
 //! This module implements a two-level sparse data structure optimized for spreadsheet grids:
 //! - Top level: HashMap of chunk coordinates
-//! - Bottom level: HashMap of local cell coordinates within each 16x16 chunk
+//! - Bottom level: Cache-friendly 64x64 chunk with Morton-encoded flat storage
 //!
-//! This provides O(1) random access while efficiently handling sparse data with
-//! good cache locality for range queries common in spreadsheet rendering.
+//! Uses Z-order (Morton) curve indexing for improved cache locality during
+//! range queries common in spreadsheet rendering.
 
 use std::collections::HashMap;
 
-/// Size of each chunk in both dimensions (16x16 cells per chunk).
-pub const CHUNK_SIZE: usize = 16;
+use bitvec::prelude::*;
+
+use crate::spatial::morton_encode;
+
+/// Size of each chunk in both dimensions (64x64 cells per chunk).
+pub const CHUNK_SIZE: usize = 64;
+
+/// Total number of cells per chunk (64 * 64 = 4096).
+pub const CHUNK_AREA: usize = CHUNK_SIZE * CHUNK_SIZE;
 
 /// Coordinate of a chunk in the grid.
 ///
-/// Represents which 16x16 block a cell belongs to.
+/// Represents which 64x64 block a cell belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ChunkCoord {
-    /// Which 16-row block (row / CHUNK_SIZE)
+    /// Which 64-row block (row >> 6)
     pub block_row: usize,
-    /// Which 16-column block (col / CHUNK_SIZE)
+    /// Which 64-column block (col >> 6)
     pub block_col: usize,
 }
 
 impl ChunkCoord {
     /// Create a ChunkCoord from a cell's global coordinates.
     ///
+    /// Uses bit shift for fast division by 64.
+    ///
     /// # Examples
     ///
     /// ```
     /// use rusheet_core::ChunkCoord;
     ///
-    /// let coord = ChunkCoord::from_cell(17, 33);
+    /// let coord = ChunkCoord::from_cell(64, 128);
     /// assert_eq!(coord.block_row, 1);
     /// assert_eq!(coord.block_col, 2);
     /// ```
+    #[inline]
     pub fn from_cell(row: usize, col: usize) -> Self {
         Self {
-            block_row: row / CHUNK_SIZE,
-            block_col: col / CHUNK_SIZE,
+            block_row: row >> 6,  // row / 64
+            block_col: col >> 6,  // col / 64
         }
     }
 }
 
-/// A single 16x16 chunk of cells.
+/// A single 64x64 chunk of cells using Morton-encoded flat storage.
 ///
-/// Stores cells using local coordinates (0-15) within the chunk.
+/// Uses Structure-of-Arrays layout with BitVec for O(1) existence checks
+/// and cache-friendly memory access patterns via Z-order curve indexing.
 #[derive(Clone, Debug)]
 pub struct Chunk<T> {
-    /// Cells within this chunk, keyed by local (row, col) coordinates.
-    cells: HashMap<(u8, u8), T>,
+    /// Bitmap indicating which cells are occupied (4096 bits = 512 bytes)
+    occupied: BitVec,
+    /// Flat storage indexed by Morton code, None for empty cells
+    cells: Vec<Option<T>>,
+    /// Count of occupied cells for O(1) len()
+    count: usize,
 }
 
 impl<T> Chunk<T> {
     /// Create a new empty chunk.
     pub fn new() -> Self {
         Self {
-            cells: HashMap::new(),
+            occupied: bitvec![0; CHUNK_AREA],
+            cells: (0..CHUNK_AREA).map(|_| None).collect(),
+            count: 0,
         }
     }
 
@@ -64,20 +81,32 @@ impl<T> Chunk<T> {
     ///
     /// # Arguments
     ///
-    /// * `local_row` - Row within this chunk (0-15)
-    /// * `local_col` - Column within this chunk (0-15)
+    /// * `local_row` - Row within this chunk (0-63)
+    /// * `local_col` - Column within this chunk (0-63)
+    #[inline]
     pub fn get(&self, local_row: u8, local_col: u8) -> Option<&T> {
-        self.cells.get(&(local_row, local_col))
+        let idx = morton_encode(local_row, local_col) as usize;
+        if self.occupied[idx] {
+            self.cells[idx].as_ref()
+        } else {
+            None
+        }
     }
 
     /// Get a mutable reference to a cell at the given local coordinates.
     ///
     /// # Arguments
     ///
-    /// * `local_row` - Row within this chunk (0-15)
-    /// * `local_col` - Column within this chunk (0-15)
+    /// * `local_row` - Row within this chunk (0-63)
+    /// * `local_col` - Column within this chunk (0-63)
+    #[inline]
     pub fn get_mut(&mut self, local_row: u8, local_col: u8) -> Option<&mut T> {
-        self.cells.get_mut(&(local_row, local_col))
+        let idx = morton_encode(local_row, local_col) as usize;
+        if self.occupied[idx] {
+            self.cells[idx].as_mut()
+        } else {
+            None
+        }
     }
 
     /// Insert a value at the given local coordinates.
@@ -86,11 +115,20 @@ impl<T> Chunk<T> {
     ///
     /// # Arguments
     ///
-    /// * `local_row` - Row within this chunk (0-15)
-    /// * `local_col` - Column within this chunk (0-15)
+    /// * `local_row` - Row within this chunk (0-63)
+    /// * `local_col` - Column within this chunk (0-63)
     /// * `value` - Value to insert
+    #[inline]
     pub fn insert(&mut self, local_row: u8, local_col: u8, value: T) -> Option<T> {
-        self.cells.insert((local_row, local_col), value)
+        let idx = morton_encode(local_row, local_col) as usize;
+        let was_occupied = self.occupied[idx];
+        self.occupied.set(idx, true);
+
+        if !was_occupied {
+            self.count += 1;
+        }
+
+        std::mem::replace(&mut self.cells[idx], Some(value))
     }
 
     /// Remove a cell at the given local coordinates.
@@ -99,34 +137,57 @@ impl<T> Chunk<T> {
     ///
     /// # Arguments
     ///
-    /// * `local_row` - Row within this chunk (0-15)
-    /// * `local_col` - Column within this chunk (0-15)
+    /// * `local_row` - Row within this chunk (0-63)
+    /// * `local_col` - Column within this chunk (0-63)
+    #[inline]
     pub fn remove(&mut self, local_row: u8, local_col: u8) -> Option<T> {
-        self.cells.remove(&(local_row, local_col))
+        let idx = morton_encode(local_row, local_col) as usize;
+        if self.occupied[idx] {
+            self.occupied.set(idx, false);
+            self.count -= 1;
+            self.cells[idx].take()
+        } else {
+            None
+        }
     }
 
     /// Check if this chunk is empty.
+    #[inline]
     pub fn is_empty(&self) -> bool {
-        self.cells.is_empty()
+        self.count == 0
     }
 
     /// Get the number of cells in this chunk.
+    #[inline]
     pub fn len(&self) -> usize {
-        self.cells.len()
+        self.count
     }
 
     /// Iterate over all cells in this chunk.
     ///
     /// Returns an iterator of ((local_row, local_col), &value) tuples.
     pub fn iter(&self) -> impl Iterator<Item = ((u8, u8), &T)> {
-        self.cells.iter().map(|(k, v)| (*k, v))
+        self.occupied
+            .iter_ones()
+            .filter_map(move |idx| {
+                let (row, col) = crate::spatial::morton_decode(idx as u16);
+                self.cells[idx].as_ref().map(|v| ((row, col), v))
+            })
     }
 
     /// Iterate mutably over all cells in this chunk.
     ///
     /// Returns an iterator of ((local_row, local_col), &mut value) tuples.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = ((u8, u8), &mut T)> {
-        self.cells.iter_mut().map(|(k, v)| (*k, v))
+        let cells = &mut self.cells;
+        self.occupied
+            .iter_ones()
+            .filter_map(move |idx| {
+                let (row, col) = crate::spatial::morton_decode(idx as u16);
+                // SAFETY: We only iterate over occupied indices
+                let cell_ptr = cells.as_mut_ptr();
+                unsafe { (*cell_ptr.add(idx)).as_mut().map(|v| ((row, col), v)) }
+            })
     }
 }
 
@@ -138,9 +199,10 @@ impl<T> Default for Chunk<T> {
 
 /// A chunked sparse grid for efficient spreadsheet storage.
 ///
-/// This data structure divides the grid into 16x16 chunks and only allocates
+/// This data structure divides the grid into 64x64 chunks and only allocates
 /// storage for chunks that contain data. Provides O(1) random access while
-/// minimizing memory usage for sparse data.
+/// minimizing memory usage for sparse data. Uses Morton encoding within chunks
+/// for cache-friendly access patterns.
 #[derive(Clone, Debug)]
 pub struct ChunkedGrid<T> {
     /// Map of chunk coordinates to chunks.
@@ -341,6 +403,8 @@ impl<T: Clone> Default for ChunkedGrid<T> {
 
 /// Convert global coordinates to local coordinates within a chunk.
 ///
+/// Uses bitwise AND for fast modulo by 64.
+///
 /// # Arguments
 ///
 /// * `row` - Global row coordinate
@@ -348,27 +412,31 @@ impl<T: Clone> Default for ChunkedGrid<T> {
 ///
 /// # Returns
 ///
-/// A tuple of (local_row, local_col) within the chunk (0-15 for each).
+/// A tuple of (local_row, local_col) within the chunk (0-63 for each).
+#[inline]
 pub fn to_local_coords(row: usize, col: usize) -> (u8, u8) {
-    let local_row = (row % CHUNK_SIZE) as u8;
-    let local_col = (col % CHUNK_SIZE) as u8;
+    let local_row = (row & 0x3F) as u8;  // row % 64
+    let local_col = (col & 0x3F) as u8;  // col % 64
     (local_row, local_col)
 }
 
 /// Convert chunk coordinate and local coordinates to global coordinates.
 ///
+/// Uses bit shift for fast multiplication by 64.
+///
 /// # Arguments
 ///
 /// * `chunk` - The chunk coordinate
-/// * `local_row` - Row within the chunk (0-15)
-/// * `local_col` - Column within the chunk (0-15)
+/// * `local_row` - Row within the chunk (0-63)
+/// * `local_col` - Column within the chunk (0-63)
 ///
 /// # Returns
 ///
 /// A tuple of (global_row, global_col).
+#[inline]
 pub fn to_global_coords(chunk: &ChunkCoord, local_row: u8, local_col: u8) -> (usize, usize) {
-    let row = chunk.block_row * CHUNK_SIZE + local_row as usize;
-    let col = chunk.block_col * CHUNK_SIZE + local_col as usize;
+    let row = (chunk.block_row << 6) + local_row as usize;  // block_row * 64 + local
+    let col = (chunk.block_col << 6) + local_col as usize;  // block_col * 64 + local
     (row, col)
 }
 
@@ -378,20 +446,22 @@ mod tests {
 
     #[test]
     fn test_chunk_coord_from_cell() {
+        // Within first chunk (0-63)
         assert_eq!(
             ChunkCoord::from_cell(0, 0),
             ChunkCoord { block_row: 0, block_col: 0 }
         );
         assert_eq!(
-            ChunkCoord::from_cell(15, 15),
+            ChunkCoord::from_cell(63, 63),
             ChunkCoord { block_row: 0, block_col: 0 }
         );
+        // Second chunk starts at 64
         assert_eq!(
-            ChunkCoord::from_cell(16, 16),
+            ChunkCoord::from_cell(64, 64),
             ChunkCoord { block_row: 1, block_col: 1 }
         );
         assert_eq!(
-            ChunkCoord::from_cell(17, 33),
+            ChunkCoord::from_cell(65, 129),
             ChunkCoord { block_row: 1, block_col: 2 }
         );
     }
@@ -399,22 +469,22 @@ mod tests {
     #[test]
     fn test_to_local_coords() {
         assert_eq!(to_local_coords(0, 0), (0, 0));
-        assert_eq!(to_local_coords(15, 15), (15, 15));
-        assert_eq!(to_local_coords(16, 16), (0, 0));
-        assert_eq!(to_local_coords(17, 33), (1, 1));
-        assert_eq!(to_local_coords(31, 47), (15, 15));
+        assert_eq!(to_local_coords(63, 63), (63, 63));
+        assert_eq!(to_local_coords(64, 64), (0, 0));
+        assert_eq!(to_local_coords(65, 66), (1, 2));
+        assert_eq!(to_local_coords(127, 127), (63, 63));
     }
 
     #[test]
     fn test_to_global_coords() {
         let chunk = ChunkCoord { block_row: 0, block_col: 0 };
         assert_eq!(to_global_coords(&chunk, 0, 0), (0, 0));
-        assert_eq!(to_global_coords(&chunk, 15, 15), (15, 15));
+        assert_eq!(to_global_coords(&chunk, 63, 63), (63, 63));
 
         let chunk = ChunkCoord { block_row: 1, block_col: 2 };
-        assert_eq!(to_global_coords(&chunk, 0, 0), (16, 32));
-        assert_eq!(to_global_coords(&chunk, 1, 1), (17, 33));
-        assert_eq!(to_global_coords(&chunk, 15, 15), (31, 47));
+        assert_eq!(to_global_coords(&chunk, 0, 0), (64, 128));
+        assert_eq!(to_global_coords(&chunk, 1, 2), (65, 130));
+        assert_eq!(to_global_coords(&chunk, 63, 63), (127, 191));
     }
 
     #[test]
@@ -502,19 +572,19 @@ mod tests {
     fn test_chunked_grid_chunk_creation() {
         let mut grid = ChunkedGrid::new();
 
-        // Insert in different chunks
+        // Insert in different chunks (64x64 each)
         grid.insert(0, 0, 1);      // Chunk (0, 0)
-        grid.insert(16, 0, 2);     // Chunk (1, 0)
-        grid.insert(0, 16, 3);     // Chunk (0, 1)
-        grid.insert(16, 16, 4);    // Chunk (1, 1)
+        grid.insert(64, 0, 2);     // Chunk (1, 0)
+        grid.insert(0, 64, 3);     // Chunk (0, 1)
+        grid.insert(64, 64, 4);    // Chunk (1, 1)
 
         assert_eq!(grid.chunks.len(), 4);
         assert_eq!(grid.len(), 4);
 
         assert_eq!(grid.get(0, 0), Some(&1));
-        assert_eq!(grid.get(16, 0), Some(&2));
-        assert_eq!(grid.get(0, 16), Some(&3));
-        assert_eq!(grid.get(16, 16), Some(&4));
+        assert_eq!(grid.get(64, 0), Some(&2));
+        assert_eq!(grid.get(0, 64), Some(&3));
+        assert_eq!(grid.get(64, 64), Some(&4));
     }
 
     #[test]
@@ -655,7 +725,8 @@ mod tests {
         assert!(chunk.is_some());
         assert_eq!(chunk.unwrap().len(), 2);
 
-        let chunk = grid.get_chunk(16, 16);
+        // 64, 64 is in a different chunk
+        let chunk = grid.get_chunk(64, 64);
         assert!(chunk.is_none());
     }
 

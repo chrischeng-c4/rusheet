@@ -1,4 +1,5 @@
 mod api;
+mod viewport;
 
 pub use api::SpreadsheetEngine;
 

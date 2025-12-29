@@ -1,4 +1,4 @@
-use rusheet_core::{CellContent, CellCoord, CellFormat, CellValue, Workbook};
+use rusheet_core::{CellContent, CellCoord, CellFormat, CellValue, HorizontalAlign, VerticalAlign, Workbook};
 use rusheet_formula::{evaluate_formula, extract_references, DependencyGraph};
 use rusheet_history::{
     ClearRangeCommand, HistoryManager, SetCellFormatCommand, SetCellValueCommand,
@@ -8,12 +8,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use wasm_bindgen::prelude::*;
 
+use crate::viewport::{pack_format, ViewportBuffer};
+
 /// Main spreadsheet engine exposed to JavaScript
 #[wasm_bindgen]
 pub struct SpreadsheetEngine {
     workbook: Workbook,
     dep_graph: DependencyGraph,
     history: HistoryManager,
+    /// Reusable buffer for viewport data (zero-copy optimization)
+    viewport_buffer: ViewportBuffer,
 }
 
 /// Cell data for JavaScript
@@ -94,6 +98,7 @@ impl SpreadsheetEngine {
             workbook: Workbook::new("Untitled"),
             dep_graph: DependencyGraph::new(),
             history: HistoryManager::new(100),
+            viewport_buffer: ViewportBuffer::with_capacity(1000),
         }
     }
 
@@ -546,6 +551,97 @@ impl SpreadsheetEngine {
         let row = sheet.row_at_y(y);
         let col = sheet.col_at_x(x);
         vec![row, col]
+    }
+
+    // =========================================================================
+    // Zero-Copy Viewport API
+    // =========================================================================
+
+    /// Populate the internal viewport buffer with cells in the given range.
+    /// Call this before accessing the viewport arrays.
+    #[wasm_bindgen(js_name = populateViewport)]
+    pub fn populate_viewport(&mut self, start_row: u32, end_row: u32, start_col: u32, end_col: u32) {
+        self.viewport_buffer.clear();
+        let sheet = self.workbook.active_sheet();
+
+        for row in start_row..=end_row {
+            for col in start_col..=end_col {
+                let coord = CellCoord::new(row, col);
+                if let Some(cell) = sheet.get_cell(coord) {
+                    // Extract numeric value (NaN for non-numeric)
+                    let numeric_value = match &cell.content {
+                        CellContent::Value { value: CellValue::Number(n), .. } => *n,
+                        CellContent::Formula { cached_value: CellValue::Number(n), .. } => *n,
+                        _ => f64::NAN,
+                    };
+
+                    // Pack format flags
+                    let h_align = match cell.format.horizontal_align {
+                        HorizontalAlign::Left => 0,
+                        HorizontalAlign::Center => 1,
+                        HorizontalAlign::Right => 2,
+                    };
+                    let v_align = match cell.format.vertical_align {
+                        VerticalAlign::Middle => 0,
+                        VerticalAlign::Top => 1,
+                        VerticalAlign::Bottom => 2,
+                    };
+                    let format_flags = pack_format(
+                        cell.format.bold,
+                        cell.format.italic,
+                        cell.format.underline,
+                        cell.format.font_size,
+                        h_align,
+                        v_align,
+                    );
+
+                    self.viewport_buffer.push(
+                        row,
+                        col,
+                        numeric_value,
+                        format_flags,
+                        cell.content.display_value(),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Get the number of cells in the viewport buffer
+    #[wasm_bindgen(js_name = getViewportLen)]
+    pub fn get_viewport_len(&self) -> usize {
+        self.viewport_buffer.len()
+    }
+
+    /// Get pointer to viewport row indices (Uint32Array)
+    #[wasm_bindgen(js_name = getViewportRowsPtr)]
+    pub fn get_viewport_rows_ptr(&self) -> *const u32 {
+        self.viewport_buffer.rows.as_ptr()
+    }
+
+    /// Get pointer to viewport column indices (Uint32Array)
+    #[wasm_bindgen(js_name = getViewportColsPtr)]
+    pub fn get_viewport_cols_ptr(&self) -> *const u32 {
+        self.viewport_buffer.cols.as_ptr()
+    }
+
+    /// Get pointer to viewport numeric values (Float64Array)
+    #[wasm_bindgen(js_name = getViewportValuesPtr)]
+    pub fn get_viewport_values_ptr(&self) -> *const f64 {
+        self.viewport_buffer.values.as_ptr()
+    }
+
+    /// Get pointer to viewport format flags (Uint32Array)
+    #[wasm_bindgen(js_name = getViewportFormatsPtr)]
+    pub fn get_viewport_formats_ptr(&self) -> *const u32 {
+        self.viewport_buffer.formats.as_ptr()
+    }
+
+    /// Get viewport display values as JSON (strings still need serialization)
+    #[wasm_bindgen(js_name = getViewportDisplayValues)]
+    pub fn get_viewport_display_values(&self) -> String {
+        serde_json::to_string(&self.viewport_buffer.display_values)
+            .unwrap_or_else(|_| "[]".to_string())
     }
 }
 
