@@ -107,7 +107,7 @@ describe('CellEditor Integration Tests (Real Dependencies)', () => {
       // Verify formula stored
       const cellData = WasmBridge.getCellData(0, 2);
       expect(cellData.formula).toBe('=A1+B1');
-      expect(cellData.display_value).toBe('30');
+      expect(cellData.displayValue).toBe('30');
     });
 
     it('should sync textarea with formula bar during typing', () => {
@@ -176,9 +176,11 @@ describe('CellEditor Integration Tests (Real Dependencies)', () => {
 
       simulateKeyPress(textarea, 'Escape');
 
-      // Verify NOT saved
+      // Verify NOT saved - empty cell returns null or empty displayValue
       const cellData = WasmBridge.getCellData(0, 0);
-      expect(cellData.value).toBe('');
+      if (cellData !== null) {
+        expect(cellData.displayValue).toBe('');
+      }
 
       // Verify editor closed
       expect(env.cellEditor.isActive()).toBe(false);

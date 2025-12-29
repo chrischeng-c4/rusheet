@@ -7,7 +7,7 @@ use crate::range::CellCoord;
 use crate::spatial::SpatialIndex;
 
 /// Default row height in pixels
-pub const DEFAULT_ROW_HEIGHT: f64 = 21.0;
+pub const DEFAULT_ROW_HEIGHT: f64 = 24.0;
 /// Default column width in pixels
 pub const DEFAULT_COL_WIDTH: f64 = 100.0;
 
@@ -599,8 +599,8 @@ mod tests {
         // Verify spatial index works correctly with custom dimensions
         assert_eq!(sheet.row_y_position(0), 0.0);
         assert_eq!(sheet.row_y_position(1), 30.0);
-        assert_eq!(sheet.row_y_position(5), 30.0 + 21.0 * 4.0); // 30 + 4 default rows
-        assert_eq!(sheet.row_y_position(6), 30.0 + 21.0 * 4.0 + 50.0);
+        assert_eq!(sheet.row_y_position(5), 30.0 + 24.0 * 4.0); // 30 + 4 default rows
+        assert_eq!(sheet.row_y_position(6), 30.0 + 24.0 * 4.0 + 50.0);
 
         assert_eq!(sheet.col_x_position(0), 0.0);
         assert_eq!(sheet.col_x_position(1), 150.0);

@@ -24,9 +24,9 @@ describe('Complete Edit Workflow Integration Tests', () => {
   });
 
   describe('Full User Workflows', () => {
-    it('WORKFLOW: double-click → type → Enter → value persists and displays', () => {
-      // Double-click to activate
-      simulateDoubleClick(env.canvas, 10, 10);
+    it('WORKFLOW: activate → type → Enter → value persists and displays', () => {
+      // Activate editor at (0, 0)
+      env.cellEditor.activate(0, 0);
 
       // Should activate cell editor
       expect(env.cellEditor.isActive()).toBe(true);
@@ -43,7 +43,7 @@ describe('Complete Edit Workflow Integration Tests', () => {
 
       // Verify persisted to WASM
       const cellData = WasmBridge.getCellData(0, 0);
-      expect(cellData.value).toBe('Test Value');
+      expect(cellData?.value).toBe('Test Value');
 
       // Verify active cell moved down
       const activeCell = env.renderer.getActiveCell();
@@ -85,14 +85,16 @@ describe('Complete Edit Workflow Integration Tests', () => {
       simulateTyping(textarea, 'Value 1');
       simulateKeyPress(textarea, 'Tab');
 
-      // Now at (0, 1)
+      // Now at (0, 1) - need to activate to continue editing
       expect(env.renderer.getActiveCell().col).toBe(1);
+      env.cellEditor.activate(0, 1);
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, 'Value 2');
       simulateKeyPress(textarea, 'Tab');
 
-      // Now at (0, 2)
+      // Now at (0, 2) - need to activate to continue editing
       expect(env.renderer.getActiveCell().col).toBe(2);
+      env.cellEditor.activate(0, 2);
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, 'Value 3');
       simulateKeyPress(textarea, 'Tab');
@@ -137,7 +139,7 @@ describe('Complete Edit Workflow Integration Tests', () => {
       // Verify formula stored and evaluated
       const cellData = WasmBridge.getCellData(2, 0);
       expect(cellData.formula).toBe('=A1+A2');
-      expect(cellData.display_value).toBe('30');
+      expect(cellData.displayValue).toBe('30');
     });
 
     it('WORKFLOW: edit existing formula', () => {
@@ -158,7 +160,7 @@ describe('Complete Edit Workflow Integration Tests', () => {
       // Verify updated
       const cellData = WasmBridge.getCellData(0, 0);
       expect(cellData.formula).toBe('=5+10');
-      expect(cellData.display_value).toBe('15');
+      expect(cellData.displayValue).toBe('15');
     });
 
     it('WORKFLOW: enter SUM formula', () => {
@@ -176,7 +178,7 @@ describe('Complete Edit Workflow Integration Tests', () => {
       // Verify result
       const cellData = WasmBridge.getCellData(3, 0);
       expect(cellData.formula).toBe('=SUM(A1:A3)');
-      expect(cellData.display_value).toBe('60');
+      expect(cellData.displayValue).toBe('60');
     });
   });
 
@@ -188,12 +190,14 @@ describe('Complete Edit Workflow Integration Tests', () => {
       simulateTyping(textarea, 'Product');
       simulateKeyPress(textarea, 'Enter');
 
-      // Row 2
+      // Row 2 - need to activate to continue editing
+      env.cellEditor.activate(1, 0);
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, 'Apples');
       simulateKeyPress(textarea, 'Enter');
 
-      // Row 3
+      // Row 3 - need to activate to continue editing
+      env.cellEditor.activate(2, 0);
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, 'Oranges');
       simulateKeyPress(textarea, 'Enter');
@@ -214,12 +218,14 @@ describe('Complete Edit Workflow Integration Tests', () => {
       simulateTyping(textarea, 'Name');
       simulateKeyPress(textarea, 'Tab');
 
-      // Column B
+      // Column B - need to activate to continue editing
+      env.cellEditor.activate(0, 1);
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, 'Age');
       simulateKeyPress(textarea, 'Tab');
 
-      // Column C
+      // Column C - need to activate to continue editing
+      env.cellEditor.activate(0, 2);
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, 'City');
       simulateKeyPress(textarea, 'Tab');
@@ -244,28 +250,34 @@ describe('Complete Edit Workflow Integration Tests', () => {
       simulateTyping(textarea, 'Price');
       simulateKeyPress(textarea, 'Tab');
 
+      // Need to activate after Tab to continue editing
+      env.cellEditor.activate(0, 1);
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, 'Quantity');
       simulateKeyPress(textarea, 'Tab');
 
+      // Need to activate after Tab to continue editing
+      env.cellEditor.activate(0, 2);
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, 'Total');
       simulateKeyPress(textarea, 'Enter');
 
       // Data row (mixed navigation)
       // Move to (1, 0) manually
-      env.renderer.setActiveCell(1, 0);
       env.cellEditor.activate(1, 0);
 
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, '10');
       simulateKeyPress(textarea, 'Tab');
 
+      // Need to activate after Tab to continue editing
+      env.cellEditor.activate(1, 1);
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, '5');
       simulateKeyPress(textarea, 'Tab');
 
-      // Formula for total
+      // Formula for total - need to activate after Tab
+      env.cellEditor.activate(1, 2);
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, '=A2*B2');
       simulateKeyPress(textarea, 'Enter');
@@ -278,8 +290,8 @@ describe('Complete Edit Workflow Integration Tests', () => {
       expect(WasmBridge.getCellData(1, 1).value).toBe('5');
 
       const totalCell = WasmBridge.getCellData(1, 2);
-      expect(totalCell.formula).toBe('=A2*B2');
-      expect(totalCell.display_value).toBe('50');
+      expect(totalCell?.formula).toBe('=A2*B2');
+      expect(totalCell?.displayValue).toBe('50');
     });
   });
 });

@@ -183,7 +183,7 @@ impl Default for SpatialIndex {
 
 impl SpatialIndex {
     /// Default row height in pixels
-    pub const DEFAULT_ROW_HEIGHT: f64 = 21.0;
+    pub const DEFAULT_ROW_HEIGHT: f64 = 24.0;
     /// Default column width in pixels
     pub const DEFAULT_COL_WIDTH: f64 = 100.0;
     /// Initial row capacity
@@ -499,20 +499,20 @@ mod tests {
 
         // Test default row offsets
         assert_eq!(index.get_row_offset(0), 0.0);
-        assert_eq!(index.get_row_offset(1), 21.0);
-        assert_eq!(index.get_row_offset(2), 42.0);
+        assert_eq!(index.get_row_offset(1), 24.0);
+        assert_eq!(index.get_row_offset(2), 48.0);
 
         // Set custom row height
         index.set_row_height(1, 50.0);
         assert_eq!(index.get_row_height(1), 50.0);
-        assert_eq!(index.get_row_offset(2), 71.0); // 21 + 50
+        assert_eq!(index.get_row_offset(2), 74.0); // 24 + 50
 
         // Test find_row_at_offset
         assert_eq!(index.find_row_at_offset(0.0), 0);
         assert_eq!(index.find_row_at_offset(20.0), 0);
-        assert_eq!(index.find_row_at_offset(21.0), 0);
+        assert_eq!(index.find_row_at_offset(24.0), 0);
         assert_eq!(index.find_row_at_offset(30.0), 1);
-        assert_eq!(index.find_row_at_offset(71.0), 1);
+        assert_eq!(index.find_row_at_offset(74.0), 1);
         assert_eq!(index.find_row_at_offset(80.0), 2);
     }
 
@@ -551,12 +551,12 @@ mod tests {
         assert!(index.is_row_hidden(1));
 
         // Row 2 should now start where row 1 used to start
-        assert_eq!(index.get_row_offset(2), 21.0); // Only row 0 counts
+        assert_eq!(index.get_row_offset(2), 24.0); // Only row 0 counts
 
         // Unhide row 1
         index.unhide_row(1);
         assert!(!index.is_row_hidden(1));
-        assert_eq!(index.get_row_offset(2), 42.0); // Rows 0 and 1 count
+        assert_eq!(index.get_row_offset(2), 48.0); // Rows 0 and 1 count
     }
 
     #[test]

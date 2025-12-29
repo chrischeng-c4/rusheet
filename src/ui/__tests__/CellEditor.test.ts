@@ -18,7 +18,7 @@ import * as WasmBridge from '../../core/WasmBridge';
 
 // Mock WasmBridge
 vi.mock('../../core/WasmBridge', () => ({
-  getCellData: vi.fn(() => ({ value: '', formula: '', display_value: '' })),
+  getCellData: vi.fn(() => ({ value: '', formula: '', displayValue: '' })),
   setCellValue: vi.fn(),
   getColWidth: vi.fn(() => 100),
   getRowHeight: vi.fn(() => 25),
