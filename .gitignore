@@ -60,3 +60,4 @@ Desktop.ini
 # VitePress
 docs/.vitepress/dist
 docs/.vitepress/cache
+spec_reference.pdf
