@@ -124,7 +124,7 @@ describe('Cell Editing Specification (Required Behavior)', () => {
 
       const cellData = WasmBridge.getCellData(0, 2);
       expect(cellData.formula).toBe('=A1+B1');
-      expect(cellData.display_value).toBe('30');
+      expect(cellData.displayValue).toBe('30');
     });
 
     it('SPEC: editing a formula cell MUST show the formula, not the result', () => {
@@ -148,14 +148,14 @@ describe('Cell Editing Specification (Required Behavior)', () => {
       WasmBridge.setCellValue(0, 1, '=A1*2');
 
       let result = WasmBridge.getCellData(0, 1);
-      expect(result.display_value).toBe('20');
+      expect(result.displayValue).toBe('20');
 
       // Update source cell
       WasmBridge.setCellValue(0, 0, '5');
 
       // Formula must recalculate
       result = WasmBridge.getCellData(0, 1);
-      expect(result.display_value).toBe('10');
+      expect(result.displayValue).toBe('10');
     });
   });
 
@@ -168,10 +168,14 @@ describe('Cell Editing Specification (Required Behavior)', () => {
       simulateTyping(textarea, 'First');
       simulateKeyPress(textarea, 'Enter');
 
+      // Need to activate after Enter to continue editing
+      env.cellEditor.activate(1, 0);
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, 'Second');
       simulateKeyPress(textarea, 'Enter');
 
+      // Need to activate after Enter to continue editing
+      env.cellEditor.activate(2, 0);
       textarea = env.container.querySelector('textarea')!;
       simulateTyping(textarea, 'Third');
       simulateKeyPress(textarea, 'Enter');

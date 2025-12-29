@@ -13,6 +13,11 @@ import { join } from 'path';
 // Must override even if fetch exists because Node's fetch can't load local files
 const originalFetch = globalThis.fetch;
 
+// Disable WebAssembly.instantiateStreaming to force the fallback path
+// This is necessary because Node's instantiateStreaming doesn't accept happy-dom Response
+// @ts-ignore
+globalThis.WebAssembly.instantiateStreaming = undefined;
+
 // @ts-ignore - override for test environment
 globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
   const urlString = typeof url === 'string' ? url : url.toString();
@@ -23,18 +28,27 @@ globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
     try {
       const buffer = readFileSync(wasmPath);
 
-      // Convert Node Buffer to proper ArrayBuffer
-      // Create a new Uint8Array and copy the data to ensure it's a true ArrayBuffer
-      const uint8Array = new Uint8Array(buffer);
-      const arrayBuffer = uint8Array.buffer;
+      // Convert Node Buffer to proper ArrayBuffer by copying to a new ArrayBuffer
+      const arrayBuffer = new ArrayBuffer(buffer.length);
+      const view = new Uint8Array(arrayBuffer);
+      for (let i = 0; i < buffer.length; i++) {
+        view[i] = buffer[i];
+      }
 
-      // Return a Response-like object that WASM can use
-      return {
-        ok: true,
+      // Create a Response-like object that supports arrayBuffer() for fallback path
+      // Note: We use 'cors' type and proper headers to trigger the fallback in wasm-pack
+      const blob = new Blob([arrayBuffer], { type: 'application/wasm' });
+      const response = new Response(blob, {
         status: 200,
-        arrayBuffer: async () => arrayBuffer,
-        blob: async () => new Blob([arrayBuffer]),
-      } as Response;
+        statusText: 'OK',
+        headers: { 'Content-Type': 'application/wasm' },
+      });
+      // Set the type property that wasm-pack checks
+      Object.defineProperty(response, 'type', {
+        value: 'basic',
+        writable: false,
+      });
+      return response;
     } catch (error) {
       console.error('Failed to load WASM file from:', wasmPath, error);
       throw error;
@@ -77,6 +91,8 @@ class MockCanvas2DContext {
   moveTo() {}
   lineTo() {}
   arc() {}
+  rect() {}
+  clip() {}
   fill() {}
   stroke() {}
   save() {}

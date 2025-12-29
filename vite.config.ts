@@ -22,15 +22,31 @@ export default defineConfig({
     globals: true,
     environment: 'happy-dom',
     setupFiles: ['./src/__tests__/setup.ts'],
+    include: ['src/**/*.{test,spec}.ts', 'src/**/*.integration.test.ts'],
+    exclude: ['**/node_modules/**', 'e2e/**', '**/e2e/**', 'example/**'],
     pool: 'forks',
     isolate: false,
-    deps: {
-      inline: ['rusheet-wasm'],
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
+    server: {
+      deps: {
+        inline: ['rusheet-wasm'],
+      },
+    },
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'text-summary', 'html', 'json', 'lcov'],
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['node_modules/', 'src/__tests__/**', '**/*.test.ts', '**/*.spec.ts', '**/*.integration.test.ts', 'src/main.ts', 'pkg/', '.vite/'],
+      thresholds: { branches: 60, functions: 60, lines: 60, statements: 60 },
     },
   },
   server: {
     fs: {
-      allow: ['..'], // Allow serving files from parent directory (for pkg/)
+      allow: ['..'],
     },
   },
 });

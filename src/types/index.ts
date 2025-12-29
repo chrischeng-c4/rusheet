@@ -1,6 +1,6 @@
 export interface CellData {
   value: string | null;
-  display_value: string;
+  displayValue: string;
   formula?: string;
   format: CellFormat;
   row: number;
@@ -11,11 +11,11 @@ export interface CellFormat {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
-  font_size?: number;
-  text_color?: string;
-  background_color?: string;
-  horizontal_align?: 'left' | 'center' | 'right';
-  vertical_align?: 'top' | 'middle' | 'bottom';
+  fontSize?: number;
+  textColor?: string;
+  backgroundColor?: string;
+  horizontalAlign?: 'left' | 'center' | 'right';
+  verticalAlign?: 'top' | 'middle' | 'bottom';
 }
 
 export interface Selection {

@@ -302,7 +302,7 @@ async function main(): Promise<void> {
       // Format header row
       WasmBridge.setRangeFormat(0, 0, 0, 3, {
         bold: true,
-        background_color: '#f0f0f0',
+        backgroundColor: '#f0f0f0',
       });
 
       // Format summary row

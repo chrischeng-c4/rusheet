@@ -52,6 +52,10 @@ export function cleanupTestEnvironment(env: {
   container: HTMLElement;
   formulaBar: HTMLInputElement;
 }) {
+  // Clear WASM cell data to prevent test pollution
+  // Clear a reasonable range of cells that tests might have used
+  WasmBridge.clearRange(0, 0, 20, 20);
+
   if (env.canvas.parentNode) {
     env.canvas.parentNode.removeChild(env.canvas);
   }

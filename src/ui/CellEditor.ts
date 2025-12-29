@@ -108,6 +108,7 @@ export default class CellEditor {
     // Existing key handling
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
+      event.stopPropagation(); // Prevent InputController from re-activating
       this.commit();
       // Move down to next cell
       const activeCell = this.renderer.getActiveCell();
@@ -117,6 +118,7 @@ export default class CellEditor {
       }
     } else if (event.key === 'Tab') {
       event.preventDefault();
+      event.stopPropagation(); // Prevent InputController from also handling Tab
       this.commit();
       // Move right to next cell
       const activeCell = this.renderer.getActiveCell();
@@ -127,6 +129,7 @@ export default class CellEditor {
       }
     } else if (event.key === 'Escape') {
       event.preventDefault();
+      event.stopPropagation(); // Prevent InputController from handling Escape
       this.cancel();
     }
   }
@@ -187,6 +190,7 @@ export default class CellEditor {
   private handleFormulaBarKeydown(event: KeyboardEvent): void {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
+      event.stopPropagation(); // Prevent InputController from re-activating
       this.commit();
       // Move down to next cell
       const activeCell = this.renderer.getActiveCell();
@@ -196,6 +200,7 @@ export default class CellEditor {
       }
     } else if (event.key === 'Tab') {
       event.preventDefault();
+      event.stopPropagation(); // Prevent InputController from also handling Tab
       this.commit();
       // Move right to next cell
       const activeCell = this.renderer.getActiveCell();
@@ -206,6 +211,7 @@ export default class CellEditor {
       }
     } else if (event.key === 'Escape') {
       event.preventDefault();
+      event.stopPropagation(); // Prevent InputController from handling Escape
       this.cancel();
     }
   }
@@ -259,6 +265,9 @@ export default class CellEditor {
     this.currentRow = row;
     this.currentCol = col;
     this.isEditing = true;
+
+    // Sync renderer's active cell with editor position
+    this.renderer.setActiveCell(row, col);
 
     // Get current cell value for editing
     // For formulas: show the formula expression (e.g., "=SUM(A1:B10)")

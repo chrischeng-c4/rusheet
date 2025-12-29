@@ -57,7 +57,8 @@ describe('GridRenderer Integration Tests (Real Canvas + WASM)', () => {
     it('gridToScreen and screenToGrid are inverse operations', () => {
       const gridPos = { row: 5, col: 3 };
       const screenPos = renderer.gridToScreen(gridPos.row, gridPos.col);
-      const backToGrid = renderer.screenToGrid(screenPos.x, screenPos.y);
+      // Add small offset to ensure we're inside the cell (not on the edge)
+      const backToGrid = renderer.screenToGrid(screenPos.x + 5, screenPos.y + 5);
 
       expect(backToGrid?.row).toBe(gridPos.row);
       expect(backToGrid?.col).toBe(gridPos.col);
@@ -167,7 +168,7 @@ describe('GridRenderer Integration Tests (Real Canvas + WASM)', () => {
       WasmBridge.setCellValue(0, 0, 'Formatted');
       WasmBridge.setCellFormat(0, 0, {
         bold: true,
-        background_color: '#ff0000',
+        backgroundColor: '#ff0000',
       });
 
       // Render should handle formatted cells
