@@ -5,6 +5,7 @@ pub mod functions;
 pub mod lexer;
 pub mod parser;
 pub mod parser_nom;
+pub mod reference_shifter;
 
 pub use ast::{BinaryOp, Expr, UnaryOp};
 pub use dependency::DependencyGraph;
@@ -12,6 +13,7 @@ pub use evaluator::Evaluator;
 pub use lexer::{Lexer, Token};
 pub use parser::Parser;
 pub use parser_nom::NomParser;
+pub use reference_shifter::{shift_formula_cols, shift_formula_rows};
 
 use rusheet_core::{CellError, CellValue};
 

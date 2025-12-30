@@ -8,3 +8,4 @@ description = "Undo/redo history management for RuSheet"
 
 [dependencies]
 rusheet-core = { path = "../rusheet-core" }
+rusheet-formula = { path = "../rusheet-formula" }

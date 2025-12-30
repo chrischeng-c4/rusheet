@@ -148,3 +148,89 @@ impl Expr {
         }
     }
 }
+
+impl std::fmt::Display for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Expr::Number(n) => {
+                // Format numbers without unnecessary decimals
+                if n.fract() == 0.0 && n.is_finite() {
+                    write!(f, "{}", *n as i64)
+                } else {
+                    write!(f, "{}", n)
+                }
+            }
+            Expr::String(s) => write!(f, "\"{}\"", s.replace('"', "\"\"")),
+            Expr::Boolean(b) => write!(f, "{}", if *b { "TRUE" } else { "FALSE" }),
+            Expr::Error(e) => write!(f, "{:?}", e),
+            Expr::CellRef {
+                col,
+                row,
+                abs_col,
+                abs_row,
+            } => {
+                use rusheet_core::col_to_label;
+                let col_str = col_to_label(*col);
+                let row_str = row + 1; // Convert back to 1-indexed
+                write!(
+                    f,
+                    "{}{}{}{}",
+                    if *abs_col { "$" } else { "" },
+                    col_str,
+                    if *abs_row { "$" } else { "" },
+                    row_str
+                )
+            }
+            Expr::Range { start, end } => write!(f, "{}:{}", start, end),
+            Expr::SheetRef {
+                sheet_name,
+                reference,
+            } => {
+                // Quote sheet name if it contains spaces or special chars
+                if sheet_name.contains(' ') || sheet_name.contains('!') {
+                    write!(f, "'{}'!{}", sheet_name, reference)
+                } else {
+                    write!(f, "{}!{}", sheet_name, reference)
+                }
+            }
+            Expr::Binary { left, op, right } => {
+                write!(f, "{}{}{}", left, op, right)
+            }
+            Expr::Unary { op, operand } => match op {
+                UnaryOp::Neg => write!(f, "-{}", operand),
+                UnaryOp::Pos => write!(f, "+{}", operand),
+                UnaryOp::Percent => write!(f, "{}%", operand),
+            },
+            Expr::FunctionCall { name, args } => {
+                write!(f, "{}(", name)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, "{}", arg)?;
+                }
+                write!(f, ")")
+            }
+            Expr::Grouped(inner) => write!(f, "({})", inner),
+        }
+    }
+}
+
+impl std::fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BinaryOp::Add => write!(f, "+"),
+            BinaryOp::Sub => write!(f, "-"),
+            BinaryOp::Mul => write!(f, "*"),
+            BinaryOp::Div => write!(f, "/"),
+            BinaryOp::Pow => write!(f, "^"),
+            BinaryOp::Concat => write!(f, "&"),
+            BinaryOp::Eq => write!(f, "="),
+            BinaryOp::Ne => write!(f, "<>"),
+            BinaryOp::Lt => write!(f, "<"),
+            BinaryOp::Gt => write!(f, ">"),
+            BinaryOp::Le => write!(f, "<="),
+            BinaryOp::Ge => write!(f, ">="),
+        }
+    }
+}

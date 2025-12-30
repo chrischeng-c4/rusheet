@@ -137,6 +137,27 @@ export function getColWidth(col: number): number {
   return getEngine().getColWidth(col);
 }
 
+// Row/Column Insert/Delete
+export function insertRows(atRow: number, count: number): [number, number][] {
+  const json = getEngine().insertRows(atRow, count);
+  return JSON.parse(json);
+}
+
+export function deleteRows(atRow: number, count: number): [number, number][] {
+  const json = getEngine().deleteRows(atRow, count);
+  return JSON.parse(json);
+}
+
+export function insertCols(atCol: number, count: number): [number, number][] {
+  const json = getEngine().insertCols(atCol, count);
+  return JSON.parse(json);
+}
+
+export function deleteCols(atCol: number, count: number): [number, number][] {
+  const json = getEngine().deleteCols(atCol, count);
+  return JSON.parse(json);
+}
+
 export function serialize(): string {
   return getEngine().serialize();
 }

@@ -19,6 +19,10 @@ export type {
   ActiveSheetChangeEvent,
   UndoEvent,
   RedoEvent,
+  RowsInsertEvent,
+  RowsDeleteEvent,
+  ColsInsertEvent,
+  ColsDeleteEvent,
   DataLoadedEvent,
 } from './types/events';
 

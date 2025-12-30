@@ -319,6 +319,196 @@ impl Sheet {
             self.spatial.set_col_width(col as usize, width);
         }
     }
+
+    /// Helper to shift HashMap keys by a delta (positive or negative).
+    /// Keys >= `from` are shifted by `delta`.
+    fn shift_dimension_keys(map: &mut HashMap<u32, f64>, from: u32, delta: i32) {
+        if delta == 0 {
+            return;
+        }
+
+        let mut new_map = HashMap::new();
+
+        for (&key, &value) in map.iter() {
+            if key >= from {
+                if delta > 0 {
+                    // Shift right/down
+                    new_map.insert(key + delta as u32, value);
+                } else {
+                    // Shift left/up
+                    let shift_amount = (-delta) as u32;
+                    if key >= shift_amount {
+                        new_map.insert(key - shift_amount, value);
+                    }
+                    // If key < shift_amount, it would go negative, so skip it
+                }
+            } else {
+                new_map.insert(key, value);
+            }
+        }
+
+        *map = new_map;
+    }
+
+    /// Insert rows at the given position, shifting existing rows down.
+    /// Returns the list of cells that were shifted (old_coord, new_coord).
+    ///
+    /// # Arguments
+    /// * `at_row` - The row index where new rows should be inserted
+    /// * `count` - The number of rows to insert
+    pub fn insert_rows(&mut self, at_row: u32, count: u32) -> Vec<(CellCoord, CellCoord)> {
+        if count == 0 {
+            return Vec::new();
+        }
+
+        // Shift cells in the ChunkedGrid
+        let shifts = self.cells.shift_rows_down(at_row as usize, count as usize);
+
+        // Update spatial index
+        self.spatial.insert_rows(at_row as usize, count as usize);
+
+        // Shift row heights HashMap
+        Self::shift_dimension_keys(&mut self.row_heights, at_row, count as i32);
+
+        // Update spatial index with shifted row heights
+        for (&row, &height) in &self.row_heights {
+            self.spatial.set_row_height(row as usize, height);
+        }
+
+        // Convert shifts to CellCoord
+        shifts
+            .into_iter()
+            .map(|((old_row, old_col), (new_row, new_col))| {
+                (
+                    CellCoord::new(old_row as u32, old_col as u32),
+                    CellCoord::new(new_row as u32, new_col as u32),
+                )
+            })
+            .collect()
+    }
+
+    /// Delete rows at the given position, shifting remaining rows up.
+    /// Returns the deleted cells.
+    ///
+    /// # Arguments
+    /// * `at_row` - The row index where deletion should start
+    /// * `count` - The number of rows to delete
+    pub fn delete_rows(&mut self, at_row: u32, count: u32) -> Vec<(CellCoord, Cell)> {
+        if count == 0 {
+            return Vec::new();
+        }
+
+        let end_row = at_row + count;
+
+        // Shift cells in the ChunkedGrid
+        let (deleted_cells, _shifts) = self.cells.shift_rows_up(at_row as usize, count as usize);
+
+        // Update spatial index
+        self.spatial.delete_rows(at_row as usize, count as usize);
+
+        // Remove row heights in deleted range and shift remaining
+        let mut new_row_heights = HashMap::new();
+        for (&row, &height) in &self.row_heights {
+            if row < at_row {
+                new_row_heights.insert(row, height);
+            } else if row >= end_row {
+                new_row_heights.insert(row - count, height);
+            }
+            // Rows in [at_row, end_row) are deleted
+        }
+        self.row_heights = new_row_heights;
+
+        // Update spatial index with new row heights
+        for (&row, &height) in &self.row_heights {
+            self.spatial.set_row_height(row as usize, height);
+        }
+
+        // Convert deleted cells to CellCoord
+        deleted_cells
+            .into_iter()
+            .map(|((row, col), cell)| (CellCoord::new(row as u32, col as u32), cell))
+            .collect()
+    }
+
+    /// Insert columns at the given position, shifting existing columns right.
+    /// Returns the list of cells that were shifted (old_coord, new_coord).
+    ///
+    /// # Arguments
+    /// * `at_col` - The column index where new columns should be inserted
+    /// * `count` - The number of columns to insert
+    pub fn insert_cols(&mut self, at_col: u32, count: u32) -> Vec<(CellCoord, CellCoord)> {
+        if count == 0 {
+            return Vec::new();
+        }
+
+        // Shift cells in the ChunkedGrid
+        let shifts = self.cells.shift_cols_right(at_col as usize, count as usize);
+
+        // Update spatial index
+        self.spatial.insert_cols(at_col as usize, count as usize);
+
+        // Shift column widths HashMap
+        Self::shift_dimension_keys(&mut self.col_widths, at_col, count as i32);
+
+        // Update spatial index with shifted column widths
+        for (&col, &width) in &self.col_widths {
+            self.spatial.set_col_width(col as usize, width);
+        }
+
+        // Convert shifts to CellCoord
+        shifts
+            .into_iter()
+            .map(|((old_row, old_col), (new_row, new_col))| {
+                (
+                    CellCoord::new(old_row as u32, old_col as u32),
+                    CellCoord::new(new_row as u32, new_col as u32),
+                )
+            })
+            .collect()
+    }
+
+    /// Delete columns at the given position, shifting remaining columns left.
+    /// Returns the deleted cells.
+    ///
+    /// # Arguments
+    /// * `at_col` - The column index where deletion should start
+    /// * `count` - The number of columns to delete
+    pub fn delete_cols(&mut self, at_col: u32, count: u32) -> Vec<(CellCoord, Cell)> {
+        if count == 0 {
+            return Vec::new();
+        }
+
+        let end_col = at_col + count;
+
+        // Shift cells in the ChunkedGrid
+        let (deleted_cells, _shifts) = self.cells.shift_cols_left(at_col as usize, count as usize);
+
+        // Update spatial index
+        self.spatial.delete_cols(at_col as usize, count as usize);
+
+        // Remove column widths in deleted range and shift remaining
+        let mut new_col_widths = HashMap::new();
+        for (&col, &width) in &self.col_widths {
+            if col < at_col {
+                new_col_widths.insert(col, width);
+            } else if col >= end_col {
+                new_col_widths.insert(col - count, width);
+            }
+            // Columns in [at_col, end_col) are deleted
+        }
+        self.col_widths = new_col_widths;
+
+        // Update spatial index with new column widths
+        for (&col, &width) in &self.col_widths {
+            self.spatial.set_col_width(col as usize, width);
+        }
+
+        // Convert deleted cells to CellCoord
+        deleted_cells
+            .into_iter()
+            .map(|((row, col), cell)| (CellCoord::new(row as u32, col as u32), cell))
+            .collect()
+    }
 }
 
 // Custom Deserialize implementation to rebuild spatial index after deserialization
@@ -615,5 +805,277 @@ mod tests {
         assert_eq!(sheet.col_at_x(0.0), 0);
         assert_eq!(sheet.col_at_x(150.0), 0);
         assert_eq!(sheet.col_at_x(151.0), 1);
+    }
+
+    #[test]
+    fn test_insert_rows_shifts_cells() {
+        let mut sheet = Sheet::new("Test");
+
+        // Insert some cells
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(1.0));
+        sheet.set_cell(CellCoord::new(1, 0), Cell::number(2.0));
+        sheet.set_cell(CellCoord::new(2, 0), Cell::number(3.0));
+        sheet.set_cell(CellCoord::new(1, 1), Cell::text("B2"));
+
+        // Insert 2 rows at row 1
+        let shifts = sheet.insert_rows(1, 2);
+
+        // Row 0 should stay in place
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+
+        // Rows 1 and 2 should be empty (gap)
+        assert!(sheet.get_cell(CellCoord::new(1, 0)).is_none());
+        assert!(sheet.get_cell(CellCoord::new(2, 0)).is_none());
+
+        // Row 1 content should shift to row 3
+        assert_eq!(sheet.get_cell_value(CellCoord::new(3, 0)).as_number(), Some(2.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(3, 1)).as_text(), "B2");
+
+        // Row 2 content should shift to row 4
+        assert_eq!(sheet.get_cell_value(CellCoord::new(4, 0)).as_number(), Some(3.0));
+
+        // Check shifts return value
+        assert_eq!(shifts.len(), 3); // 3 cells were shifted
+    }
+
+    #[test]
+    fn test_delete_rows_removes_and_shifts() {
+        let mut sheet = Sheet::new("Test");
+
+        // Insert some cells
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(1.0));
+        sheet.set_cell(CellCoord::new(1, 0), Cell::number(2.0));
+        sheet.set_cell(CellCoord::new(2, 0), Cell::number(3.0));
+        sheet.set_cell(CellCoord::new(3, 0), Cell::number(4.0));
+        sheet.set_cell(CellCoord::new(4, 0), Cell::number(5.0));
+
+        // Delete 2 rows at row 1 (delete rows 1 and 2)
+        let deleted = sheet.delete_rows(1, 2);
+
+        // Row 0 should stay in place
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+
+        // Row 1 should now contain what was row 3
+        assert_eq!(sheet.get_cell_value(CellCoord::new(1, 0)).as_number(), Some(4.0));
+
+        // Row 2 should now contain what was row 4
+        assert_eq!(sheet.get_cell_value(CellCoord::new(2, 0)).as_number(), Some(5.0));
+
+        // Rows 3 and 4 should be empty
+        assert!(sheet.get_cell(CellCoord::new(3, 0)).is_none());
+        assert!(sheet.get_cell(CellCoord::new(4, 0)).is_none());
+
+        // Check deleted cells
+        assert_eq!(deleted.len(), 2);
+        assert_eq!(deleted[0].0, CellCoord::new(1, 0));
+        assert_eq!(deleted[0].1.computed_value().as_number(), Some(2.0));
+        assert_eq!(deleted[1].0, CellCoord::new(2, 0));
+        assert_eq!(deleted[1].1.computed_value().as_number(), Some(3.0));
+    }
+
+    #[test]
+    fn test_insert_rows_shifts_row_heights() {
+        let mut sheet = Sheet::new("Test");
+
+        // Set some custom row heights
+        sheet.set_row_height(0, 30.0);
+        sheet.set_row_height(1, 40.0);
+        sheet.set_row_height(2, 50.0);
+
+        // Insert 2 rows at row 1
+        sheet.insert_rows(1, 2);
+
+        // Row 0 height should stay the same
+        assert_eq!(sheet.get_row_height(0), 30.0);
+
+        // Rows 1 and 2 should have default height
+        assert_eq!(sheet.get_row_height(1), DEFAULT_ROW_HEIGHT);
+        assert_eq!(sheet.get_row_height(2), DEFAULT_ROW_HEIGHT);
+
+        // Original row 1 (40.0) should now be at row 3
+        assert_eq!(sheet.get_row_height(3), 40.0);
+
+        // Original row 2 (50.0) should now be at row 4
+        assert_eq!(sheet.get_row_height(4), 50.0);
+    }
+
+    #[test]
+    fn test_delete_rows_shifts_row_heights() {
+        let mut sheet = Sheet::new("Test");
+
+        // Set some custom row heights
+        sheet.set_row_height(0, 30.0);
+        sheet.set_row_height(1, 40.0);
+        sheet.set_row_height(2, 50.0);
+        sheet.set_row_height(3, 60.0);
+        sheet.set_row_height(4, 70.0);
+
+        // Delete 2 rows at row 1 (delete rows 1 and 2)
+        sheet.delete_rows(1, 2);
+
+        // Row 0 height should stay the same
+        assert_eq!(sheet.get_row_height(0), 30.0);
+
+        // Row 1 should now have the height that was at row 3
+        assert_eq!(sheet.get_row_height(1), 60.0);
+
+        // Row 2 should now have the height that was at row 4
+        assert_eq!(sheet.get_row_height(2), 70.0);
+
+        // Rows 3 and 4 should have default height
+        assert_eq!(sheet.get_row_height(3), DEFAULT_ROW_HEIGHT);
+        assert_eq!(sheet.get_row_height(4), DEFAULT_ROW_HEIGHT);
+    }
+
+    #[test]
+    fn test_insert_cols_shifts_cells() {
+        let mut sheet = Sheet::new("Test");
+
+        // Insert some cells
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(1.0));
+        sheet.set_cell(CellCoord::new(0, 1), Cell::number(2.0));
+        sheet.set_cell(CellCoord::new(0, 2), Cell::number(3.0));
+        sheet.set_cell(CellCoord::new(1, 1), Cell::text("B2"));
+
+        // Insert 2 columns at column 1
+        let shifts = sheet.insert_cols(1, 2);
+
+        // Column 0 should stay in place
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+
+        // Columns 1 and 2 should be empty (gap)
+        assert!(sheet.get_cell(CellCoord::new(0, 1)).is_none());
+        assert!(sheet.get_cell(CellCoord::new(0, 2)).is_none());
+
+        // Column 1 content should shift to column 3
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 3)).as_number(), Some(2.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(1, 3)).as_text(), "B2");
+
+        // Column 2 content should shift to column 4
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 4)).as_number(), Some(3.0));
+
+        // Check shifts return value
+        assert_eq!(shifts.len(), 3); // 3 cells were shifted
+    }
+
+    #[test]
+    fn test_delete_cols_removes_and_shifts() {
+        let mut sheet = Sheet::new("Test");
+
+        // Insert some cells
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(1.0));
+        sheet.set_cell(CellCoord::new(0, 1), Cell::number(2.0));
+        sheet.set_cell(CellCoord::new(0, 2), Cell::number(3.0));
+        sheet.set_cell(CellCoord::new(0, 3), Cell::number(4.0));
+        sheet.set_cell(CellCoord::new(0, 4), Cell::number(5.0));
+
+        // Delete 2 columns at column 1 (delete columns 1 and 2)
+        let deleted = sheet.delete_cols(1, 2);
+
+        // Column 0 should stay in place
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+
+        // Column 1 should now contain what was column 3
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 1)).as_number(), Some(4.0));
+
+        // Column 2 should now contain what was column 4
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 2)).as_number(), Some(5.0));
+
+        // Columns 3 and 4 should be empty
+        assert!(sheet.get_cell(CellCoord::new(0, 3)).is_none());
+        assert!(sheet.get_cell(CellCoord::new(0, 4)).is_none());
+
+        // Check deleted cells
+        assert_eq!(deleted.len(), 2);
+        assert_eq!(deleted[0].0, CellCoord::new(0, 1));
+        assert_eq!(deleted[0].1.computed_value().as_number(), Some(2.0));
+        assert_eq!(deleted[1].0, CellCoord::new(0, 2));
+        assert_eq!(deleted[1].1.computed_value().as_number(), Some(3.0));
+    }
+
+    #[test]
+    fn test_insert_cols_shifts_col_widths() {
+        let mut sheet = Sheet::new("Test");
+
+        // Set some custom column widths
+        sheet.set_col_width(0, 150.0);
+        sheet.set_col_width(1, 200.0);
+        sheet.set_col_width(2, 250.0);
+
+        // Insert 2 columns at column 1
+        sheet.insert_cols(1, 2);
+
+        // Column 0 width should stay the same
+        assert_eq!(sheet.get_col_width(0), 150.0);
+
+        // Columns 1 and 2 should have default width
+        assert_eq!(sheet.get_col_width(1), DEFAULT_COL_WIDTH);
+        assert_eq!(sheet.get_col_width(2), DEFAULT_COL_WIDTH);
+
+        // Original column 1 (200.0) should now be at column 3
+        assert_eq!(sheet.get_col_width(3), 200.0);
+
+        // Original column 2 (250.0) should now be at column 4
+        assert_eq!(sheet.get_col_width(4), 250.0);
+    }
+
+    #[test]
+    fn test_delete_cols_shifts_col_widths() {
+        let mut sheet = Sheet::new("Test");
+
+        // Set some custom column widths
+        sheet.set_col_width(0, 150.0);
+        sheet.set_col_width(1, 200.0);
+        sheet.set_col_width(2, 250.0);
+        sheet.set_col_width(3, 300.0);
+        sheet.set_col_width(4, 350.0);
+
+        // Delete 2 columns at column 1 (delete columns 1 and 2)
+        sheet.delete_cols(1, 2);
+
+        // Column 0 width should stay the same
+        assert_eq!(sheet.get_col_width(0), 150.0);
+
+        // Column 1 should now have the width that was at column 3
+        assert_eq!(sheet.get_col_width(1), 300.0);
+
+        // Column 2 should now have the width that was at column 4
+        assert_eq!(sheet.get_col_width(2), 350.0);
+
+        // Columns 3 and 4 should have default width
+        assert_eq!(sheet.get_col_width(3), DEFAULT_COL_WIDTH);
+        assert_eq!(sheet.get_col_width(4), DEFAULT_COL_WIDTH);
+    }
+
+    #[test]
+    fn test_insert_delete_rows_empty_operations() {
+        let mut sheet = Sheet::new("Test");
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(1.0));
+
+        // Insert 0 rows should do nothing
+        let shifts = sheet.insert_rows(1, 0);
+        assert_eq!(shifts.len(), 0);
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+
+        // Delete 0 rows should do nothing
+        let deleted = sheet.delete_rows(1, 0);
+        assert_eq!(deleted.len(), 0);
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+    }
+
+    #[test]
+    fn test_insert_delete_cols_empty_operations() {
+        let mut sheet = Sheet::new("Test");
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(1.0));
+
+        // Insert 0 columns should do nothing
+        let shifts = sheet.insert_cols(1, 0);
+        assert_eq!(shifts.len(), 0);
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+
+        // Delete 0 columns should do nothing
+        let deleted = sheet.delete_cols(1, 0);
+        assert_eq!(deleted.len(), 0);
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
     }
 }

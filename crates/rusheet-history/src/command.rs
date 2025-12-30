@@ -1,4 +1,5 @@
 use rusheet_core::{Cell, CellContent, CellCoord, CellFormat, CellValue, Sheet};
+use rusheet_formula::{shift_formula_rows, shift_formula_cols};
 
 /// Type alias for boxed commands
 pub type CommandBox = Box<dyn Command>;
@@ -341,6 +342,524 @@ impl Command for CompositeCommand {
     }
 }
 
+/// Insert rows at the given position
+#[derive(Debug)]
+pub struct InsertRowsCommand {
+    at_row: u32,
+    count: u32,
+    // For undo: track which cells were shifted and their old formulas
+    shifted_cells: Vec<(CellCoord, CellCoord)>,  // (old_coord, new_coord)
+    formula_updates: Vec<(CellCoord, String, String)>,  // (coord, old_formula, new_formula)
+}
+
+impl InsertRowsCommand {
+    pub fn new(at_row: u32, count: u32) -> Self {
+        Self {
+            at_row,
+            count,
+            shifted_cells: Vec::new(),
+            formula_updates: Vec::new(),
+        }
+    }
+}
+
+impl Command for InsertRowsCommand {
+    fn execute(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        if self.count == 0 {
+            return Vec::new();
+        }
+
+        let mut affected = Vec::new();
+
+        // Step 1: Collect all formulas that need to be updated
+        self.formula_updates.clear();
+        for coord in sheet.non_empty_coords().collect::<Vec<_>>() {
+            if let Some(cell) = sheet.get_cell(coord) {
+                if let CellContent::Formula { expression, .. } = &cell.content {
+                    // Try to shift the formula
+                    if let Some(new_formula) = shift_formula_rows(expression, self.at_row, self.count as i32) {
+                        if &new_formula != expression {
+                            self.formula_updates.push((coord, expression.clone(), new_formula));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 2: Insert rows and shift cells
+        self.shifted_cells = sheet.insert_rows(self.at_row, self.count);
+
+        // Step 3: Update formulas (cells may have been shifted)
+        for (orig_coord, _old_formula, new_formula) in &self.formula_updates {
+            // If the cell was shifted, find its new coordinate
+            let current_coord = if orig_coord.row >= self.at_row {
+                CellCoord::new(orig_coord.row + self.count, orig_coord.col)
+            } else {
+                *orig_coord
+            };
+
+            if let Some(cell) = sheet.get_cell(current_coord) {
+                if let CellContent::Formula { cached_value, .. } = &cell.content {
+                    let cached = cached_value.clone();
+                    let cell_mut = sheet.get_cell_mut(current_coord);
+                    cell_mut.content = CellContent::Formula {
+                        expression: new_formula.clone(),
+                        cached_value: cached,
+                    };
+                    affected.push(current_coord);
+                }
+            }
+        }
+
+        // Collect all affected cells from shifted cells
+        for (old_coord, new_coord) in &self.shifted_cells {
+            affected.push(*old_coord);
+            affected.push(*new_coord);
+        }
+
+        affected
+    }
+
+    fn undo(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        let mut affected = Vec::new();
+
+        // Step 1: Restore old formulas
+        for (coord, old_formula, _new_formula) in &self.formula_updates {
+            if let Some(cell) = sheet.get_cell(*coord) {
+                if let CellContent::Formula { cached_value, .. } = &cell.content {
+                    let cached = cached_value.clone();
+                    let cell_mut = sheet.get_cell_mut(*coord);
+                    cell_mut.content = CellContent::Formula {
+                        expression: old_formula.clone(),
+                        cached_value: cached,
+                    };
+                    affected.push(*coord);
+                }
+            }
+        }
+
+        // Step 2: Delete the inserted rows to shift cells back
+        sheet.delete_rows(self.at_row, self.count);
+
+        // Collect all affected cells
+        for (old_coord, new_coord) in &self.shifted_cells {
+            affected.push(*old_coord);
+            affected.push(*new_coord);
+        }
+
+        affected
+    }
+
+    fn description(&self) -> &str {
+        "Insert rows"
+    }
+}
+
+/// Delete rows at the given position
+#[derive(Debug)]
+pub struct DeleteRowsCommand {
+    at_row: u32,
+    count: u32,
+    // For undo: store deleted cells and their coordinates
+    deleted_cells: Vec<(CellCoord, Cell)>,
+    // Track formula updates
+    formula_updates: Vec<(CellCoord, String, String)>,  // (coord, old_formula, new_formula)
+}
+
+impl DeleteRowsCommand {
+    pub fn new(at_row: u32, count: u32) -> Self {
+        Self {
+            at_row,
+            count,
+            deleted_cells: Vec::new(),
+            formula_updates: Vec::new(),
+        }
+    }
+}
+
+impl Command for DeleteRowsCommand {
+    fn execute(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        if self.count == 0 {
+            return Vec::new();
+        }
+
+        let mut affected = Vec::new();
+
+        // Step 1: Collect all formulas that need to be updated (or become invalid)
+        self.formula_updates.clear();
+        for coord in sheet.non_empty_coords().collect::<Vec<_>>() {
+            if let Some(cell) = sheet.get_cell(coord) {
+                if let CellContent::Formula { expression, .. } = &cell.content {
+                    // Try to shift the formula (negative delta for deletion)
+                    if let Some(new_formula) = shift_formula_rows(expression, self.at_row, -(self.count as i32)) {
+                        if &new_formula != expression {
+                            self.formula_updates.push((coord, expression.clone(), new_formula));
+                        }
+                    } else {
+                        // Formula becomes invalid - convert to error
+                        let coord_in_deleted_range = coord.row >= self.at_row && coord.row < self.at_row + self.count;
+                        if !coord_in_deleted_range {
+                            self.formula_updates.push((coord, expression.clone(), "=#REF!".to_string()));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 2: Delete rows and capture deleted cells
+        self.deleted_cells = sheet.delete_rows(self.at_row, self.count);
+
+        // Step 3: Update formulas
+        for (coord, _old_formula, new_formula) in &self.formula_updates {
+            // Coord may have shifted, need to find the shifted coordinate
+            let shifted_coord = if coord.row >= self.at_row + self.count {
+                CellCoord::new(coord.row - self.count, coord.col)
+            } else {
+                *coord
+            };
+
+            if let Some(cell) = sheet.get_cell(shifted_coord) {
+                if let CellContent::Formula { cached_value, .. } = &cell.content {
+                    let cached = cached_value.clone();
+                    let cell_mut = sheet.get_cell_mut(shifted_coord);
+                    cell_mut.content = CellContent::Formula {
+                        expression: new_formula.clone(),
+                        cached_value: cached,
+                    };
+                    affected.push(shifted_coord);
+                }
+            }
+        }
+
+        // Collect all affected cells
+        for (coord, _) in &self.deleted_cells {
+            affected.push(*coord);
+        }
+
+        affected
+    }
+
+    fn undo(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        let mut affected = Vec::new();
+
+        // Step 1: Restore old formulas (before re-inserting rows)
+        for (coord, old_formula, _new_formula) in &self.formula_updates {
+            // Coord is stored as the original coordinate before deletion
+            let current_coord = if coord.row >= self.at_row + self.count {
+                CellCoord::new(coord.row - self.count, coord.col)
+            } else if coord.row >= self.at_row {
+                // This was a deleted cell, skip it (will be restored below)
+                continue;
+            } else {
+                *coord
+            };
+
+            if let Some(cell) = sheet.get_cell(current_coord) {
+                if let CellContent::Formula { cached_value, .. } = &cell.content {
+                    let cached = cached_value.clone();
+                    let cell_mut = sheet.get_cell_mut(current_coord);
+                    cell_mut.content = CellContent::Formula {
+                        expression: old_formula.clone(),
+                        cached_value: cached,
+                    };
+                }
+            }
+        }
+
+        // Step 2: Insert rows back to make space
+        sheet.insert_rows(self.at_row, self.count);
+
+        // Step 3: Restore deleted cells
+        for (coord, cell) in &self.deleted_cells {
+            sheet.set_cell(*coord, cell.clone());
+            affected.push(*coord);
+        }
+
+        // Step 4: Restore formulas that were in cells above deleted range
+        for (coord, old_formula, _new_formula) in &self.formula_updates {
+            if coord.row >= self.at_row + self.count {
+                // This cell has been shifted back to its original position
+                if let Some(cell) = sheet.get_cell(*coord) {
+                    if let CellContent::Formula { cached_value, .. } = &cell.content {
+                        let cached = cached_value.clone();
+                        let cell_mut = sheet.get_cell_mut(*coord);
+                        cell_mut.content = CellContent::Formula {
+                            expression: old_formula.clone(),
+                            cached_value: cached,
+                        };
+                        affected.push(*coord);
+                    }
+                }
+            }
+        }
+
+        affected
+    }
+
+    fn description(&self) -> &str {
+        "Delete rows"
+    }
+}
+
+/// Insert columns at the given position
+#[derive(Debug)]
+pub struct InsertColsCommand {
+    at_col: u32,
+    count: u32,
+    // For undo: track which cells were shifted and their old formulas
+    shifted_cells: Vec<(CellCoord, CellCoord)>,  // (old_coord, new_coord)
+    formula_updates: Vec<(CellCoord, String, String)>,  // (coord, old_formula, new_formula)
+}
+
+impl InsertColsCommand {
+    pub fn new(at_col: u32, count: u32) -> Self {
+        Self {
+            at_col,
+            count,
+            shifted_cells: Vec::new(),
+            formula_updates: Vec::new(),
+        }
+    }
+}
+
+impl Command for InsertColsCommand {
+    fn execute(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        if self.count == 0 {
+            return Vec::new();
+        }
+
+        let mut affected = Vec::new();
+
+        // Step 1: Collect all formulas that need to be updated
+        self.formula_updates.clear();
+        for coord in sheet.non_empty_coords().collect::<Vec<_>>() {
+            if let Some(cell) = sheet.get_cell(coord) {
+                if let CellContent::Formula { expression, .. } = &cell.content {
+                    // Try to shift the formula
+                    if let Some(new_formula) = shift_formula_cols(expression, self.at_col, self.count as i32) {
+                        if &new_formula != expression {
+                            self.formula_updates.push((coord, expression.clone(), new_formula));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 2: Insert columns and shift cells
+        self.shifted_cells = sheet.insert_cols(self.at_col, self.count);
+
+        // Step 3: Update formulas (cells may have been shifted)
+        for (orig_coord, _old_formula, new_formula) in &self.formula_updates {
+            // If the cell was shifted, find its new coordinate
+            let current_coord = if orig_coord.col >= self.at_col {
+                CellCoord::new(orig_coord.row, orig_coord.col + self.count)
+            } else {
+                *orig_coord
+            };
+
+            if let Some(cell) = sheet.get_cell(current_coord) {
+                if let CellContent::Formula { cached_value, .. } = &cell.content {
+                    let cached = cached_value.clone();
+                    let cell_mut = sheet.get_cell_mut(current_coord);
+                    cell_mut.content = CellContent::Formula {
+                        expression: new_formula.clone(),
+                        cached_value: cached,
+                    };
+                    affected.push(current_coord);
+                }
+            }
+        }
+
+        // Collect all affected cells from shifted cells
+        for (old_coord, new_coord) in &self.shifted_cells {
+            affected.push(*old_coord);
+            affected.push(*new_coord);
+        }
+
+        affected
+    }
+
+    fn undo(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        let mut affected = Vec::new();
+
+        // Step 1: Restore old formulas
+        for (coord, old_formula, _new_formula) in &self.formula_updates {
+            if let Some(cell) = sheet.get_cell(*coord) {
+                if let CellContent::Formula { cached_value, .. } = &cell.content {
+                    let cached = cached_value.clone();
+                    let cell_mut = sheet.get_cell_mut(*coord);
+                    cell_mut.content = CellContent::Formula {
+                        expression: old_formula.clone(),
+                        cached_value: cached,
+                    };
+                    affected.push(*coord);
+                }
+            }
+        }
+
+        // Step 2: Delete the inserted columns to shift cells back
+        sheet.delete_cols(self.at_col, self.count);
+
+        // Collect all affected cells
+        for (old_coord, new_coord) in &self.shifted_cells {
+            affected.push(*old_coord);
+            affected.push(*new_coord);
+        }
+
+        affected
+    }
+
+    fn description(&self) -> &str {
+        "Insert columns"
+    }
+}
+
+/// Delete columns at the given position
+#[derive(Debug)]
+pub struct DeleteColsCommand {
+    at_col: u32,
+    count: u32,
+    // For undo: store deleted cells and their coordinates
+    deleted_cells: Vec<(CellCoord, Cell)>,
+    // Track formula updates
+    formula_updates: Vec<(CellCoord, String, String)>,  // (coord, old_formula, new_formula)
+}
+
+impl DeleteColsCommand {
+    pub fn new(at_col: u32, count: u32) -> Self {
+        Self {
+            at_col,
+            count,
+            deleted_cells: Vec::new(),
+            formula_updates: Vec::new(),
+        }
+    }
+}
+
+impl Command for DeleteColsCommand {
+    fn execute(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        if self.count == 0 {
+            return Vec::new();
+        }
+
+        let mut affected = Vec::new();
+
+        // Step 1: Collect all formulas that need to be updated (or become invalid)
+        self.formula_updates.clear();
+        for coord in sheet.non_empty_coords().collect::<Vec<_>>() {
+            if let Some(cell) = sheet.get_cell(coord) {
+                if let CellContent::Formula { expression, .. } = &cell.content {
+                    // Try to shift the formula (negative delta for deletion)
+                    if let Some(new_formula) = shift_formula_cols(expression, self.at_col, -(self.count as i32)) {
+                        if &new_formula != expression {
+                            self.formula_updates.push((coord, expression.clone(), new_formula));
+                        }
+                    } else {
+                        // Formula becomes invalid - convert to error
+                        let coord_in_deleted_range = coord.col >= self.at_col && coord.col < self.at_col + self.count;
+                        if !coord_in_deleted_range {
+                            self.formula_updates.push((coord, expression.clone(), "=#REF!".to_string()));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 2: Delete columns and capture deleted cells
+        self.deleted_cells = sheet.delete_cols(self.at_col, self.count);
+
+        // Step 3: Update formulas
+        for (coord, _old_formula, new_formula) in &self.formula_updates {
+            // Coord may have shifted, need to find the shifted coordinate
+            let shifted_coord = if coord.col >= self.at_col + self.count {
+                CellCoord::new(coord.row, coord.col - self.count)
+            } else {
+                *coord
+            };
+
+            if let Some(cell) = sheet.get_cell(shifted_coord) {
+                if let CellContent::Formula { cached_value, .. } = &cell.content {
+                    let cached = cached_value.clone();
+                    let cell_mut = sheet.get_cell_mut(shifted_coord);
+                    cell_mut.content = CellContent::Formula {
+                        expression: new_formula.clone(),
+                        cached_value: cached,
+                    };
+                    affected.push(shifted_coord);
+                }
+            }
+        }
+
+        // Collect all affected cells
+        for (coord, _) in &self.deleted_cells {
+            affected.push(*coord);
+        }
+
+        affected
+    }
+
+    fn undo(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        let mut affected = Vec::new();
+
+        // Step 1: Restore old formulas (before re-inserting columns)
+        for (coord, old_formula, _new_formula) in &self.formula_updates {
+            // Coord is stored as the original coordinate before deletion
+            let current_coord = if coord.col >= self.at_col + self.count {
+                CellCoord::new(coord.row, coord.col - self.count)
+            } else if coord.col >= self.at_col {
+                // This was a deleted cell, skip it (will be restored below)
+                continue;
+            } else {
+                *coord
+            };
+
+            if let Some(cell) = sheet.get_cell(current_coord) {
+                if let CellContent::Formula { cached_value, .. } = &cell.content {
+                    let cached = cached_value.clone();
+                    let cell_mut = sheet.get_cell_mut(current_coord);
+                    cell_mut.content = CellContent::Formula {
+                        expression: old_formula.clone(),
+                        cached_value: cached,
+                    };
+                }
+            }
+        }
+
+        // Step 2: Insert columns back to make space
+        sheet.insert_cols(self.at_col, self.count);
+
+        // Step 3: Restore deleted cells
+        for (coord, cell) in &self.deleted_cells {
+            sheet.set_cell(*coord, cell.clone());
+            affected.push(*coord);
+        }
+
+        // Step 4: Restore formulas that were in cells to the right of deleted range
+        for (coord, old_formula, _new_formula) in &self.formula_updates {
+            if coord.col >= self.at_col + self.count {
+                // This cell has been shifted back to its original position
+                if let Some(cell) = sheet.get_cell(*coord) {
+                    if let CellContent::Formula { cached_value, .. } = &cell.content {
+                        let cached = cached_value.clone();
+                        let cell_mut = sheet.get_cell_mut(*coord);
+                        cell_mut.content = CellContent::Formula {
+                            expression: old_formula.clone(),
+                            cached_value: cached,
+                        };
+                        affected.push(*coord);
+                    }
+                }
+            }
+        }
+
+        affected
+    }
+
+    fn description(&self) -> &str {
+        "Delete columns"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,5 +916,343 @@ mod tests {
             sheet.get_cell_value(CellCoord::new(1, 0)).as_number(),
             Some(3.0)
         );
+    }
+
+    #[test]
+    fn test_insert_rows_command() {
+        let mut sheet = Sheet::new("Test");
+
+        // Set up some cells
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(1.0));
+        sheet.set_cell(CellCoord::new(1, 0), Cell::number(2.0));
+        sheet.set_cell(CellCoord::new(2, 0), Cell::number(3.0));
+
+        let mut cmd = InsertRowsCommand::new(1, 2);
+
+        // Execute
+        cmd.execute(&mut sheet);
+
+        // Row 0 should stay in place
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+
+        // Rows 1 and 2 should be empty (newly inserted)
+        assert!(sheet.get_cell(CellCoord::new(1, 0)).is_none());
+        assert!(sheet.get_cell(CellCoord::new(2, 0)).is_none());
+
+        // Old row 1 should shift to row 3
+        assert_eq!(sheet.get_cell_value(CellCoord::new(3, 0)).as_number(), Some(2.0));
+
+        // Old row 2 should shift to row 4
+        assert_eq!(sheet.get_cell_value(CellCoord::new(4, 0)).as_number(), Some(3.0));
+
+        // Undo
+        cmd.undo(&mut sheet);
+
+        // Should restore original state
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(1, 0)).as_number(), Some(2.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(2, 0)).as_number(), Some(3.0));
+        assert!(sheet.get_cell(CellCoord::new(3, 0)).is_none());
+        assert!(sheet.get_cell(CellCoord::new(4, 0)).is_none());
+    }
+
+    #[test]
+    fn test_insert_rows_updates_formulas() {
+        let mut sheet = Sheet::new("Test");
+
+        // Set up a formula that references rows
+        let cell = Cell {
+            content: CellContent::Formula {
+                expression: "=A3+A4".to_string(),
+                cached_value: CellValue::Empty,
+            },
+            format: Default::default(),
+        };
+        sheet.set_cell(CellCoord::new(0, 0), cell);
+
+        let mut cmd = InsertRowsCommand::new(2, 2);
+
+        // Execute
+        cmd.execute(&mut sheet);
+
+        // Formula should be updated: A3 (row 2) becomes A5, A4 (row 3) becomes A6
+        // Both references are >= row 2, so both shift by 2
+        if let Some(cell) = sheet.get_cell(CellCoord::new(0, 0)) {
+            if let CellContent::Formula { expression, .. } = &cell.content {
+                assert_eq!(expression, "=A5+A6");
+            } else {
+                panic!("Expected formula");
+            }
+        } else {
+            panic!("Cell not found");
+        }
+
+        // Undo
+        cmd.undo(&mut sheet);
+
+        // Formula should be restored
+        if let Some(cell) = sheet.get_cell(CellCoord::new(0, 0)) {
+            if let CellContent::Formula { expression, .. } = &cell.content {
+                assert_eq!(expression, "=A3+A4");
+            } else {
+                panic!("Expected formula");
+            }
+        } else {
+            panic!("Cell not found");
+        }
+    }
+
+    #[test]
+    fn test_delete_rows_command() {
+        let mut sheet = Sheet::new("Test");
+
+        // Set up some cells
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(1.0));
+        sheet.set_cell(CellCoord::new(1, 0), Cell::number(2.0));
+        sheet.set_cell(CellCoord::new(2, 0), Cell::number(3.0));
+        sheet.set_cell(CellCoord::new(3, 0), Cell::number(4.0));
+        sheet.set_cell(CellCoord::new(4, 0), Cell::number(5.0));
+
+        let mut cmd = DeleteRowsCommand::new(1, 2);
+
+        // Execute
+        cmd.execute(&mut sheet);
+
+        // Row 0 should stay in place
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+
+        // Row 1 should now contain what was row 3
+        assert_eq!(sheet.get_cell_value(CellCoord::new(1, 0)).as_number(), Some(4.0));
+
+        // Row 2 should now contain what was row 4
+        assert_eq!(sheet.get_cell_value(CellCoord::new(2, 0)).as_number(), Some(5.0));
+
+        // Rows 3 and 4 should be empty
+        assert!(sheet.get_cell(CellCoord::new(3, 0)).is_none());
+        assert!(sheet.get_cell(CellCoord::new(4, 0)).is_none());
+
+        // Undo
+        cmd.undo(&mut sheet);
+
+        // Should restore original state
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(1, 0)).as_number(), Some(2.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(2, 0)).as_number(), Some(3.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(3, 0)).as_number(), Some(4.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(4, 0)).as_number(), Some(5.0));
+    }
+
+    #[test]
+    fn test_delete_rows_updates_formulas() {
+        let mut sheet = Sheet::new("Test");
+
+        // Set up a formula that references rows
+        let cell = Cell {
+            content: CellContent::Formula {
+                expression: "=A1+A5".to_string(),
+                cached_value: CellValue::Empty,
+            },
+            format: Default::default(),
+        };
+        sheet.set_cell(CellCoord::new(0, 0), cell);
+
+        let mut cmd = DeleteRowsCommand::new(2, 2);
+
+        // Execute
+        cmd.execute(&mut sheet);
+
+        // Formula should be updated: A5 becomes A3 (shifted up by 2)
+        if let Some(cell) = sheet.get_cell(CellCoord::new(0, 0)) {
+            if let CellContent::Formula { expression, .. } = &cell.content {
+                assert_eq!(expression, "=A1+A3");
+            } else {
+                panic!("Expected formula");
+            }
+        } else {
+            panic!("Cell not found");
+        }
+
+        // Undo
+        cmd.undo(&mut sheet);
+
+        // Formula should be restored
+        if let Some(cell) = sheet.get_cell(CellCoord::new(0, 0)) {
+            if let CellContent::Formula { expression, .. } = &cell.content {
+                assert_eq!(expression, "=A1+A5");
+            } else {
+                panic!("Expected formula");
+            }
+        } else {
+            panic!("Cell not found");
+        }
+    }
+
+    #[test]
+    fn test_insert_cols_command() {
+        let mut sheet = Sheet::new("Test");
+
+        // Set up some cells
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(1.0));
+        sheet.set_cell(CellCoord::new(0, 1), Cell::number(2.0));
+        sheet.set_cell(CellCoord::new(0, 2), Cell::number(3.0));
+
+        let mut cmd = InsertColsCommand::new(1, 2);
+
+        // Execute
+        cmd.execute(&mut sheet);
+
+        // Column 0 should stay in place
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+
+        // Columns 1 and 2 should be empty (newly inserted)
+        assert!(sheet.get_cell(CellCoord::new(0, 1)).is_none());
+        assert!(sheet.get_cell(CellCoord::new(0, 2)).is_none());
+
+        // Old column 1 should shift to column 3
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 3)).as_number(), Some(2.0));
+
+        // Old column 2 should shift to column 4
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 4)).as_number(), Some(3.0));
+
+        // Undo
+        cmd.undo(&mut sheet);
+
+        // Should restore original state
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 1)).as_number(), Some(2.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 2)).as_number(), Some(3.0));
+        assert!(sheet.get_cell(CellCoord::new(0, 3)).is_none());
+        assert!(sheet.get_cell(CellCoord::new(0, 4)).is_none());
+    }
+
+    #[test]
+    fn test_insert_cols_updates_formulas() {
+        let mut sheet = Sheet::new("Test");
+
+        // Set up a formula that references columns
+        let cell = Cell {
+            content: CellContent::Formula {
+                expression: "=C1+D1".to_string(),
+                cached_value: CellValue::Empty,
+            },
+            format: Default::default(),
+        };
+        sheet.set_cell(CellCoord::new(0, 0), cell);
+
+        let mut cmd = InsertColsCommand::new(2, 2);
+
+        // Execute
+        cmd.execute(&mut sheet);
+
+        // Formula should be updated: C1 (col 2) becomes E1, D1 (col 3) becomes F1
+        // Both references are >= col 2, so both shift by 2
+        if let Some(cell) = sheet.get_cell(CellCoord::new(0, 0)) {
+            if let CellContent::Formula { expression, .. } = &cell.content {
+                assert_eq!(expression, "=E1+F1");
+            } else {
+                panic!("Expected formula");
+            }
+        } else {
+            panic!("Cell not found");
+        }
+
+        // Undo
+        cmd.undo(&mut sheet);
+
+        // Formula should be restored
+        if let Some(cell) = sheet.get_cell(CellCoord::new(0, 0)) {
+            if let CellContent::Formula { expression, .. } = &cell.content {
+                assert_eq!(expression, "=C1+D1");
+            } else {
+                panic!("Expected formula");
+            }
+        } else {
+            panic!("Cell not found");
+        }
+    }
+
+    #[test]
+    fn test_delete_cols_command() {
+        let mut sheet = Sheet::new("Test");
+
+        // Set up some cells
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(1.0));
+        sheet.set_cell(CellCoord::new(0, 1), Cell::number(2.0));
+        sheet.set_cell(CellCoord::new(0, 2), Cell::number(3.0));
+        sheet.set_cell(CellCoord::new(0, 3), Cell::number(4.0));
+        sheet.set_cell(CellCoord::new(0, 4), Cell::number(5.0));
+
+        let mut cmd = DeleteColsCommand::new(1, 2);
+
+        // Execute
+        cmd.execute(&mut sheet);
+
+        // Column 0 should stay in place
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+
+        // Column 1 should now contain what was column 3
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 1)).as_number(), Some(4.0));
+
+        // Column 2 should now contain what was column 4
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 2)).as_number(), Some(5.0));
+
+        // Columns 3 and 4 should be empty
+        assert!(sheet.get_cell(CellCoord::new(0, 3)).is_none());
+        assert!(sheet.get_cell(CellCoord::new(0, 4)).is_none());
+
+        // Undo
+        cmd.undo(&mut sheet);
+
+        // Should restore original state
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 1)).as_number(), Some(2.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 2)).as_number(), Some(3.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 3)).as_number(), Some(4.0));
+        assert_eq!(sheet.get_cell_value(CellCoord::new(0, 4)).as_number(), Some(5.0));
+    }
+
+    #[test]
+    fn test_delete_cols_updates_formulas() {
+        let mut sheet = Sheet::new("Test");
+
+        // Set up a formula that references columns
+        let cell = Cell {
+            content: CellContent::Formula {
+                expression: "=A1+E1".to_string(),
+                cached_value: CellValue::Empty,
+            },
+            format: Default::default(),
+        };
+        sheet.set_cell(CellCoord::new(0, 0), cell);
+
+        let mut cmd = DeleteColsCommand::new(2, 2);
+
+        // Execute
+        cmd.execute(&mut sheet);
+
+        // Formula should be updated: E1 becomes C1 (shifted left by 2)
+        if let Some(cell) = sheet.get_cell(CellCoord::new(0, 0)) {
+            if let CellContent::Formula { expression, .. } = &cell.content {
+                assert_eq!(expression, "=A1+C1");
+            } else {
+                panic!("Expected formula");
+            }
+        } else {
+            panic!("Cell not found");
+        }
+
+        // Undo
+        cmd.undo(&mut sheet);
+
+        // Formula should be restored
+        if let Some(cell) = sheet.get_cell(CellCoord::new(0, 0)) {
+            if let CellContent::Formula { expression, .. } = &cell.content {
+                assert_eq!(expression, "=A1+E1");
+            } else {
+                panic!("Expected formula");
+            }
+        } else {
+            panic!("Cell not found");
+        }
     }
 }

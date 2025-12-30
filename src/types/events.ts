@@ -76,6 +76,35 @@ export interface RedoEvent {
   affectedCells: [number, number][];
 }
 
+// Row/Column Insert/Delete events (NEW)
+export interface RowsInsertEvent {
+  atRow: number;
+  count: number;
+  affectedCells: [number, number][];
+  source: EventSource;
+}
+
+export interface RowsDeleteEvent {
+  atRow: number;
+  count: number;
+  affectedCells: [number, number][];
+  source: EventSource;
+}
+
+export interface ColsInsertEvent {
+  atCol: number;
+  count: number;
+  affectedCells: [number, number][];
+  source: EventSource;
+}
+
+export interface ColsDeleteEvent {
+  atCol: number;
+  count: number;
+  affectedCells: [number, number][];
+  source: EventSource;
+}
+
 // Data loaded event
 export interface DataLoadedEvent {
   rows: number;

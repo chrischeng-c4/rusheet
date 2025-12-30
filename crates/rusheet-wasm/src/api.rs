@@ -2,7 +2,7 @@ use rusheet_core::{CellContent, CellCoord, CellFormat, CellValue, HorizontalAlig
 use rusheet_formula::{evaluate_formula, extract_references, DependencyGraph};
 use rusheet_history::{
     ClearRangeCommand, HistoryManager, SetCellFormatCommand, SetCellValueCommand,
-    SetRangeFormatCommand,
+    SetRangeFormatCommand, InsertRowsCommand, DeleteRowsCommand, InsertColsCommand, DeleteColsCommand,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -470,6 +470,76 @@ impl SpreadsheetEngine {
     #[wasm_bindgen(js_name = getColWidth)]
     pub fn get_col_width(&self, col: u32) -> f64 {
         self.workbook.active_sheet().get_col_width(col)
+    }
+
+    // --- Row/Column Insert/Delete ---
+
+    /// Insert rows at the given position
+    /// Returns JSON array of affected cell coordinates
+    #[wasm_bindgen(js_name = insertRows)]
+    pub fn insert_rows(&mut self, at_row: u32, count: u32) -> String {
+        let cmd = Box::new(InsertRowsCommand::new(at_row, count));
+        let affected = self.history.execute(cmd, self.workbook.active_sheet_mut());
+
+        // Rebuild dependency graph since cell references changed
+        self.rebuild_dependency_graph();
+
+        // Recalculate all formulas
+        self.recalculate_all();
+
+        let coords: Vec<[u32; 2]> = affected.iter().map(|c| [c.row, c.col]).collect();
+        serde_json::to_string(&coords).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Delete rows at the given position
+    /// Returns JSON array of affected cell coordinates
+    #[wasm_bindgen(js_name = deleteRows)]
+    pub fn delete_rows(&mut self, at_row: u32, count: u32) -> String {
+        let cmd = Box::new(DeleteRowsCommand::new(at_row, count));
+        let affected = self.history.execute(cmd, self.workbook.active_sheet_mut());
+
+        // Rebuild dependency graph since cell references changed
+        self.rebuild_dependency_graph();
+
+        // Recalculate all formulas
+        self.recalculate_all();
+
+        let coords: Vec<[u32; 2]> = affected.iter().map(|c| [c.row, c.col]).collect();
+        serde_json::to_string(&coords).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Insert columns at the given position
+    /// Returns JSON array of affected cell coordinates
+    #[wasm_bindgen(js_name = insertCols)]
+    pub fn insert_cols(&mut self, at_col: u32, count: u32) -> String {
+        let cmd = Box::new(InsertColsCommand::new(at_col, count));
+        let affected = self.history.execute(cmd, self.workbook.active_sheet_mut());
+
+        // Rebuild dependency graph since cell references changed
+        self.rebuild_dependency_graph();
+
+        // Recalculate all formulas
+        self.recalculate_all();
+
+        let coords: Vec<[u32; 2]> = affected.iter().map(|c| [c.row, c.col]).collect();
+        serde_json::to_string(&coords).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Delete columns at the given position
+    /// Returns JSON array of affected cell coordinates
+    #[wasm_bindgen(js_name = deleteCols)]
+    pub fn delete_cols(&mut self, at_col: u32, count: u32) -> String {
+        let cmd = Box::new(DeleteColsCommand::new(at_col, count));
+        let affected = self.history.execute(cmd, self.workbook.active_sheet_mut());
+
+        // Rebuild dependency graph since cell references changed
+        self.rebuild_dependency_graph();
+
+        // Recalculate all formulas
+        self.recalculate_all();
+
+        let coords: Vec<[u32; 2]> = affected.iter().map(|c| [c.row, c.col]).collect();
+        serde_json::to_string(&coords).unwrap_or_else(|_| "[]".to_string())
     }
 
     // --- Serialization ---

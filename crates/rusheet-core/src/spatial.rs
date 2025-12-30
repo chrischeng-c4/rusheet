@@ -413,6 +413,242 @@ impl SpatialIndex {
     pub fn is_col_hidden(&self, col: usize) -> bool {
         self.hidden_cols.contains(&col)
     }
+
+    /// Rebuilds the row heights Fenwick tree from the given row index onwards.
+    ///
+    /// This is necessary after insert/delete operations since Fenwick trees
+    /// don't support middle insertion efficiently.
+    ///
+    /// # Arguments
+    /// * `from_row` - The row index to start rebuilding from
+    fn rebuild_row_heights_from(&mut self, from_row: usize) {
+        // Clear the affected portion of the tree by subtracting current values
+        for i in from_row..self.row_sizes.len() {
+            let current_value = if i > 0 {
+                self.row_heights.prefix_sum(i) - self.row_heights.prefix_sum(i - 1)
+            } else {
+                self.row_heights.prefix_sum(i)
+            };
+            if current_value != 0.0 {
+                self.row_heights.update(i, -current_value);
+            }
+        }
+
+        // Rebuild with new values
+        for i in from_row..self.row_sizes.len() {
+            let height = if self.hidden_rows.contains(&i) {
+                0.0
+            } else {
+                self.row_sizes[i]
+            };
+            if height != 0.0 {
+                self.row_heights.update(i, height);
+            }
+        }
+    }
+
+    /// Rebuilds the column widths Fenwick tree from the given column index onwards.
+    ///
+    /// This is necessary after insert/delete operations since Fenwick trees
+    /// don't support middle insertion efficiently.
+    ///
+    /// # Arguments
+    /// * `from_col` - The column index to start rebuilding from
+    fn rebuild_col_widths_from(&mut self, from_col: usize) {
+        // Clear the affected portion of the tree by subtracting current values
+        for i in from_col..self.col_sizes.len() {
+            let current_value = if i > 0 {
+                self.col_widths.prefix_sum(i) - self.col_widths.prefix_sum(i - 1)
+            } else {
+                self.col_widths.prefix_sum(i)
+            };
+            if current_value != 0.0 {
+                self.col_widths.update(i, -current_value);
+            }
+        }
+
+        // Rebuild with new values
+        for i in from_col..self.col_sizes.len() {
+            let width = if self.hidden_cols.contains(&i) {
+                0.0
+            } else {
+                self.col_sizes[i]
+            };
+            if width != 0.0 {
+                self.col_widths.update(i, width);
+            }
+        }
+    }
+
+    /// Insert rows at the given position, shifting existing rows down.
+    ///
+    /// # Arguments
+    /// * `at_row` - The row index where new rows should be inserted
+    /// * `count` - The number of rows to insert
+    ///
+    /// Returns the affected row range (start, end) for formula updates.
+    pub fn insert_rows(&mut self, at_row: usize, count: usize) -> (usize, usize) {
+        if count == 0 {
+            return (at_row, at_row);
+        }
+
+        // Ensure we have capacity up to the insertion point
+        // splice will add to the length, so we only need to ensure at_row exists
+        if at_row > self.row_sizes.len() {
+            self.ensure_capacity(at_row, 0);
+        }
+
+        // Update hidden rows: shift indices >= at_row by count
+        let old_hidden: Vec<usize> = self.hidden_rows.iter().copied().collect();
+        self.hidden_rows.clear();
+        for &row in &old_hidden {
+            if row >= at_row {
+                self.hidden_rows.insert(row + count);
+            } else {
+                self.hidden_rows.insert(row);
+            }
+        }
+
+        // Insert default row heights at the position
+        let new_rows = vec![self.default_row_height; count];
+        self.row_sizes.splice(at_row..at_row, new_rows);
+
+        // Grow the Fenwick tree if needed
+        let new_size = self.row_sizes.len();
+        if new_size > self.row_heights.capacity() {
+            self.row_heights.grow(new_size);
+        }
+
+        // Rebuild the Fenwick tree from the insertion point
+        self.rebuild_row_heights_from(at_row);
+
+        (at_row, at_row + count)
+    }
+
+    /// Delete rows at the given position, shifting existing rows up.
+    ///
+    /// # Arguments
+    /// * `at_row` - The row index where deletion should start
+    /// * `count` - The number of rows to delete
+    ///
+    /// Returns the removed row heights.
+    pub fn delete_rows(&mut self, at_row: usize, count: usize) -> Vec<f64> {
+        if count == 0 || at_row >= self.row_sizes.len() {
+            return Vec::new();
+        }
+
+        // Calculate actual number of rows to delete
+        let actual_count = count.min(self.row_sizes.len() - at_row);
+        let end_row = at_row + actual_count;
+
+        // Store the removed heights
+        let removed: Vec<f64> = self.row_sizes[at_row..end_row].to_vec();
+
+        // Update hidden rows: shift indices > end_row by -count, remove hidden rows in range
+        let old_hidden: Vec<usize> = self.hidden_rows.iter().copied().collect();
+        self.hidden_rows.clear();
+        for &row in &old_hidden {
+            if row < at_row {
+                self.hidden_rows.insert(row);
+            } else if row >= end_row {
+                self.hidden_rows.insert(row - actual_count);
+            }
+            // Rows in [at_row, end_row) are deleted, so don't re-insert them
+        }
+
+        // Remove the rows from row_sizes
+        self.row_sizes.drain(at_row..end_row);
+
+        // Rebuild the Fenwick tree from the deletion point
+        self.rebuild_row_heights_from(at_row);
+
+        removed
+    }
+
+    /// Insert columns at the given position, shifting existing columns right.
+    ///
+    /// # Arguments
+    /// * `at_col` - The column index where new columns should be inserted
+    /// * `count` - The number of columns to insert
+    ///
+    /// Returns the affected column range (start, end) for formula updates.
+    pub fn insert_cols(&mut self, at_col: usize, count: usize) -> (usize, usize) {
+        if count == 0 {
+            return (at_col, at_col);
+        }
+
+        // Ensure we have capacity up to the insertion point
+        // splice will add to the length, so we only need to ensure at_col exists
+        if at_col > self.col_sizes.len() {
+            self.ensure_capacity(0, at_col);
+        }
+
+        // Update hidden columns: shift indices >= at_col by count
+        let old_hidden: Vec<usize> = self.hidden_cols.iter().copied().collect();
+        self.hidden_cols.clear();
+        for &col in &old_hidden {
+            if col >= at_col {
+                self.hidden_cols.insert(col + count);
+            } else {
+                self.hidden_cols.insert(col);
+            }
+        }
+
+        // Insert default column widths at the position
+        let new_cols = vec![self.default_col_width; count];
+        self.col_sizes.splice(at_col..at_col, new_cols);
+
+        // Grow the Fenwick tree if needed
+        let new_size = self.col_sizes.len();
+        if new_size > self.col_widths.capacity() {
+            self.col_widths.grow(new_size);
+        }
+
+        // Rebuild the Fenwick tree from the insertion point
+        self.rebuild_col_widths_from(at_col);
+
+        (at_col, at_col + count)
+    }
+
+    /// Delete columns at the given position, shifting existing columns left.
+    ///
+    /// # Arguments
+    /// * `at_col` - The column index where deletion should start
+    /// * `count` - The number of columns to delete
+    ///
+    /// Returns the removed column widths.
+    pub fn delete_cols(&mut self, at_col: usize, count: usize) -> Vec<f64> {
+        if count == 0 || at_col >= self.col_sizes.len() {
+            return Vec::new();
+        }
+
+        // Calculate actual number of columns to delete
+        let actual_count = count.min(self.col_sizes.len() - at_col);
+        let end_col = at_col + actual_count;
+
+        // Store the removed widths
+        let removed: Vec<f64> = self.col_sizes[at_col..end_col].to_vec();
+
+        // Update hidden columns: shift indices > end_col by -count, remove hidden cols in range
+        let old_hidden: Vec<usize> = self.hidden_cols.iter().copied().collect();
+        self.hidden_cols.clear();
+        for &col in &old_hidden {
+            if col < at_col {
+                self.hidden_cols.insert(col);
+            } else if col >= end_col {
+                self.hidden_cols.insert(col - actual_count);
+            }
+            // Columns in [at_col, end_col) are deleted, so don't re-insert them
+        }
+
+        // Remove the columns from col_sizes
+        self.col_sizes.drain(at_col..end_col);
+
+        // Rebuild the Fenwick tree from the deletion point
+        self.rebuild_col_widths_from(at_col);
+
+        removed
+    }
 }
 
 #[cfg(test)]
@@ -657,6 +893,308 @@ mod tests {
         // Can now update higher indices
         tree.update(7, 5.0);
         assert_eq!(tree.prefix_sum(7), 35.0);
+    }
+
+    #[test]
+    fn test_insert_rows_basic() {
+        let mut index = SpatialIndex::new();
+
+        // Set some custom heights
+        index.set_row_height(0, 30.0);
+        index.set_row_height(1, 40.0);
+        index.set_row_height(2, 50.0);
+
+        // Insert 2 rows at position 1
+        let (start, end) = index.insert_rows(1, 2);
+        assert_eq!(start, 1);
+        assert_eq!(end, 3);
+
+        // Check that rows shifted correctly
+        assert_eq!(index.get_row_height(0), 30.0); // Original row 0
+        assert_eq!(index.get_row_height(1), SpatialIndex::DEFAULT_ROW_HEIGHT); // New row
+        assert_eq!(index.get_row_height(2), SpatialIndex::DEFAULT_ROW_HEIGHT); // New row
+        assert_eq!(index.get_row_height(3), 40.0); // Original row 1 shifted
+        assert_eq!(index.get_row_height(4), 50.0); // Original row 2 shifted
+
+        // Check offsets
+        assert_eq!(index.get_row_offset(0), 0.0);
+        assert_eq!(index.get_row_offset(1), 30.0);
+        assert_eq!(index.get_row_offset(3), 30.0 + 24.0 + 24.0); // 30 + 2 default rows
+        assert_eq!(index.get_row_offset(4), 30.0 + 24.0 + 24.0 + 40.0);
+    }
+
+    #[test]
+    fn test_delete_rows_basic() {
+        let mut index = SpatialIndex::new();
+
+        // Set some custom heights
+        index.set_row_height(0, 30.0);
+        index.set_row_height(1, 40.0);
+        index.set_row_height(2, 50.0);
+        index.set_row_height(3, 60.0);
+
+        // Delete 2 rows starting at position 1
+        let removed = index.delete_rows(1, 2);
+        assert_eq!(removed, vec![40.0, 50.0]);
+
+        // Check that remaining rows shifted correctly
+        assert_eq!(index.get_row_height(0), 30.0); // Original row 0
+        assert_eq!(index.get_row_height(1), 60.0); // Original row 3 shifted
+
+        // Check offsets
+        assert_eq!(index.get_row_offset(0), 0.0);
+        assert_eq!(index.get_row_offset(1), 30.0);
+        assert_eq!(index.get_row_offset(2), 30.0 + 60.0);
+    }
+
+    #[test]
+    fn test_insert_rows_with_hidden() {
+        let mut index = SpatialIndex::new();
+
+        // Hide row 2
+        index.hide_row(2);
+        assert!(index.is_row_hidden(2));
+
+        // Insert 3 rows at position 1
+        index.insert_rows(1, 3);
+
+        // Row 2 should have shifted to row 5 (2 + 3)
+        assert!(!index.is_row_hidden(2)); // New row 2 is not hidden
+        assert!(index.is_row_hidden(5)); // Original row 2 shifted to 5
+    }
+
+    #[test]
+    fn test_delete_rows_with_hidden() {
+        let mut index = SpatialIndex::new();
+
+        // Hide rows 1 and 4
+        index.hide_row(1);
+        index.hide_row(4);
+        assert!(index.is_row_hidden(1));
+        assert!(index.is_row_hidden(4));
+
+        // Delete 2 rows starting at position 2
+        index.delete_rows(2, 2);
+
+        // Row 1 should still be hidden (before deletion range)
+        assert!(index.is_row_hidden(1));
+
+        // Row 4 should have shifted to row 2 (4 - 2)
+        assert!(!index.is_row_hidden(4));
+        assert!(index.is_row_hidden(2)); // Original row 4 shifted to 2
+    }
+
+    #[test]
+    fn test_delete_rows_removes_hidden_in_range() {
+        let mut index = SpatialIndex::new();
+
+        // Hide rows 2 and 3
+        index.hide_row(2);
+        index.hide_row(3);
+
+        // Delete rows 1-3 (includes hidden rows 2 and 3)
+        index.delete_rows(1, 3);
+
+        // Hidden rows in the deleted range should be gone
+        assert!(!index.is_row_hidden(2));
+        assert!(!index.is_row_hidden(3));
+    }
+
+    #[test]
+    fn test_insert_cols_basic() {
+        let mut index = SpatialIndex::new();
+
+        // Set some custom widths
+        index.set_col_width(0, 120.0);
+        index.set_col_width(1, 150.0);
+        index.set_col_width(2, 180.0);
+
+        // Insert 2 columns at position 1
+        let (start, end) = index.insert_cols(1, 2);
+        assert_eq!(start, 1);
+        assert_eq!(end, 3);
+
+        // Check that columns shifted correctly
+        assert_eq!(index.get_col_width(0), 120.0); // Original col 0
+        assert_eq!(index.get_col_width(1), SpatialIndex::DEFAULT_COL_WIDTH); // New col
+        assert_eq!(index.get_col_width(2), SpatialIndex::DEFAULT_COL_WIDTH); // New col
+        assert_eq!(index.get_col_width(3), 150.0); // Original col 1 shifted
+        assert_eq!(index.get_col_width(4), 180.0); // Original col 2 shifted
+
+        // Check offsets
+        assert_eq!(index.get_col_offset(0), 0.0);
+        assert_eq!(index.get_col_offset(1), 120.0);
+        assert_eq!(index.get_col_offset(3), 120.0 + 100.0 + 100.0);
+        assert_eq!(index.get_col_offset(4), 120.0 + 100.0 + 100.0 + 150.0);
+    }
+
+    #[test]
+    fn test_delete_cols_basic() {
+        let mut index = SpatialIndex::new();
+
+        // Set some custom widths
+        index.set_col_width(0, 120.0);
+        index.set_col_width(1, 150.0);
+        index.set_col_width(2, 180.0);
+        index.set_col_width(3, 200.0);
+
+        // Delete 2 columns starting at position 1
+        let removed = index.delete_cols(1, 2);
+        assert_eq!(removed, vec![150.0, 180.0]);
+
+        // Check that remaining columns shifted correctly
+        assert_eq!(index.get_col_width(0), 120.0); // Original col 0
+        assert_eq!(index.get_col_width(1), 200.0); // Original col 3 shifted
+
+        // Check offsets
+        assert_eq!(index.get_col_offset(0), 0.0);
+        assert_eq!(index.get_col_offset(1), 120.0);
+        assert_eq!(index.get_col_offset(2), 120.0 + 200.0);
+    }
+
+    #[test]
+    fn test_insert_cols_with_hidden() {
+        let mut index = SpatialIndex::new();
+
+        // Hide column 3
+        index.hide_col(3);
+        assert!(index.is_col_hidden(3));
+
+        // Insert 2 columns at position 2
+        index.insert_cols(2, 2);
+
+        // Column 3 should have shifted to column 5 (3 + 2)
+        assert!(!index.is_col_hidden(3)); // New column 3 is not hidden
+        assert!(index.is_col_hidden(5)); // Original column 3 shifted to 5
+    }
+
+    #[test]
+    fn test_delete_cols_with_hidden() {
+        let mut index = SpatialIndex::new();
+
+        // Hide columns 2 and 5
+        index.hide_col(2);
+        index.hide_col(5);
+        assert!(index.is_col_hidden(2));
+        assert!(index.is_col_hidden(5));
+
+        // Delete 2 columns starting at position 3
+        index.delete_cols(3, 2);
+
+        // Column 2 should still be hidden (before deletion range)
+        assert!(index.is_col_hidden(2));
+
+        // Column 5 should have shifted to column 3 (5 - 2)
+        assert!(!index.is_col_hidden(5));
+        assert!(index.is_col_hidden(3)); // Original column 5 shifted to 3
+    }
+
+    #[test]
+    fn test_delete_cols_removes_hidden_in_range() {
+        let mut index = SpatialIndex::new();
+
+        // Hide columns 1 and 2
+        index.hide_col(1);
+        index.hide_col(2);
+
+        // Delete columns 1-3 (includes hidden columns 1 and 2)
+        index.delete_cols(1, 3);
+
+        // Hidden columns in the deleted range should be gone
+        assert!(!index.is_col_hidden(1));
+        assert!(!index.is_col_hidden(2));
+    }
+
+    #[test]
+    fn test_insert_delete_rows_roundtrip() {
+        let mut index = SpatialIndex::new();
+
+        // Set initial heights
+        index.set_row_height(0, 30.0);
+        index.set_row_height(1, 40.0);
+        index.set_row_height(2, 50.0);
+
+        let offset_before = index.get_row_offset(2);
+
+        // Insert and then delete the same rows
+        index.insert_rows(1, 3);
+        index.delete_rows(1, 3);
+
+        // Should be back to original state
+        assert_eq!(index.get_row_height(0), 30.0);
+        assert_eq!(index.get_row_height(1), 40.0);
+        assert_eq!(index.get_row_height(2), 50.0);
+        assert_eq!(index.get_row_offset(2), offset_before);
+    }
+
+    #[test]
+    fn test_insert_delete_cols_roundtrip() {
+        let mut index = SpatialIndex::new();
+
+        // Set initial widths
+        index.set_col_width(0, 120.0);
+        index.set_col_width(1, 150.0);
+        index.set_col_width(2, 180.0);
+
+        let offset_before = index.get_col_offset(2);
+
+        // Insert and then delete the same columns
+        index.insert_cols(1, 3);
+        index.delete_cols(1, 3);
+
+        // Should be back to original state
+        assert_eq!(index.get_col_width(0), 120.0);
+        assert_eq!(index.get_col_width(1), 150.0);
+        assert_eq!(index.get_col_width(2), 180.0);
+        assert_eq!(index.get_col_offset(2), offset_before);
+    }
+
+    #[test]
+    fn test_insert_rows_at_end() {
+        let mut index = SpatialIndex::new();
+        let initial_len = index.row_sizes.len();
+
+        // Insert rows at the end
+        index.insert_rows(initial_len, 5);
+
+        assert_eq!(index.row_sizes.len(), initial_len + 5);
+        assert_eq!(index.get_row_height(initial_len), SpatialIndex::DEFAULT_ROW_HEIGHT);
+    }
+
+    #[test]
+    fn test_delete_rows_beyond_capacity() {
+        let mut index = SpatialIndex::new();
+        let initial_len = index.row_sizes.len();
+
+        // Try to delete beyond capacity
+        let removed = index.delete_rows(initial_len + 10, 5);
+
+        // Should return empty vec and not panic
+        assert_eq!(removed.len(), 0);
+        assert_eq!(index.row_sizes.len(), initial_len);
+    }
+
+    #[test]
+    fn test_insert_rows_zero_count() {
+        let mut index = SpatialIndex::new();
+        let initial_len = index.row_sizes.len();
+
+        let (start, end) = index.insert_rows(5, 0);
+
+        assert_eq!(start, 5);
+        assert_eq!(end, 5);
+        assert_eq!(index.row_sizes.len(), initial_len);
+    }
+
+    #[test]
+    fn test_delete_rows_zero_count() {
+        let mut index = SpatialIndex::new();
+        let initial_len = index.row_sizes.len();
+
+        let removed = index.delete_rows(5, 0);
+
+        assert_eq!(removed.len(), 0);
+        assert_eq!(index.row_sizes.len(), initial_len);
     }
 }
 

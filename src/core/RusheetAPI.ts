@@ -9,7 +9,11 @@ import type {
   ActiveSheetChangeEvent,
   UndoEvent,
   RedoEvent,
-  EventSource
+  EventSource,
+  RowsInsertEvent,
+  RowsDeleteEvent,
+  ColsInsertEvent,
+  ColsDeleteEvent
 } from '../types/events';
 
 export interface CellChangeEvent {
@@ -96,6 +100,22 @@ export class RusheetAPI {
 
   onRedo(callback: (event: RedoEvent) => void): () => void {
     return emitter.on('redo', callback);
+  }
+
+  onRowsInsert(callback: (event: RowsInsertEvent) => void): () => void {
+    return emitter.on('rowsInsert', callback);
+  }
+
+  onRowsDelete(callback: (event: RowsDeleteEvent) => void): () => void {
+    return emitter.on('rowsDelete', callback);
+  }
+
+  onColsInsert(callback: (event: ColsInsertEvent) => void): () => void {
+    return emitter.on('colsInsert', callback);
+  }
+
+  onColsDelete(callback: (event: ColsDeleteEvent) => void): () => void {
+    return emitter.on('colsDelete', callback);
   }
 
   // Cell operations (wrap WasmBridge and emit events)
@@ -289,6 +309,31 @@ export class RusheetAPI {
   setColWidth(col: number, width: number): void { WasmBridge.setColWidth(col, width); }
   getRowHeight(row: number): number { return WasmBridge.getRowHeight(row); }
   getColWidth(col: number): number { return WasmBridge.getColWidth(col); }
+
+  // Row/Column Insert/Delete
+  insertRows(atRow: number, count: number, source: EventSource = 'api'): [number, number][] {
+    const affected = WasmBridge.insertRows(atRow, count);
+    emitter.emit<RowsInsertEvent>('rowsInsert', { atRow, count, affectedCells: affected, source });
+    return affected;
+  }
+
+  deleteRows(atRow: number, count: number, source: EventSource = 'api'): [number, number][] {
+    const affected = WasmBridge.deleteRows(atRow, count);
+    emitter.emit<RowsDeleteEvent>('rowsDelete', { atRow, count, affectedCells: affected, source });
+    return affected;
+  }
+
+  insertCols(atCol: number, count: number, source: EventSource = 'api'): [number, number][] {
+    const affected = WasmBridge.insertCols(atCol, count);
+    emitter.emit<ColsInsertEvent>('colsInsert', { atCol, count, affectedCells: affected, source });
+    return affected;
+  }
+
+  deleteCols(atCol: number, count: number, source: EventSource = 'api'): [number, number][] {
+    const affected = WasmBridge.deleteCols(atCol, count);
+    emitter.emit<ColsDeleteEvent>('colsDelete', { atCol, count, affectedCells: affected, source });
+    return affected;
+  }
 
   // Viewport (pass through)
   getViewportData(startRow: number, endRow: number, startCol: number, endCol: number) {

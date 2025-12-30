@@ -19,6 +19,12 @@ pub const CHUNK_SIZE: usize = 64;
 /// Total number of cells per chunk (64 * 64 = 4096).
 pub const CHUNK_AREA: usize = CHUNK_SIZE * CHUNK_SIZE;
 
+/// Type alias for cell coordinates (row, col).
+pub type CellCoord = (usize, usize);
+
+/// Type alias for a shift mapping from old coordinate to new coordinate.
+pub type ShiftMapping = (CellCoord, CellCoord);
+
 /// Coordinate of a chunk in the grid.
 ///
 /// Represents which 64x64 block a cell belongs to.
@@ -393,6 +399,170 @@ impl<T: Clone> ChunkedGrid<T> {
 
         result
     }
+
+    /// Shift all rows >= start_row down by `count` positions.
+    /// Used for inserting rows - creates a gap at start_row.
+    ///
+    /// Returns a list of (old_coord, new_coord) for affected cells.
+    pub fn shift_rows_down(&mut self, start_row: usize, count: usize) -> Vec<ShiftMapping> {
+        if count == 0 {
+            return Vec::new();
+        }
+
+        // Collect all cells that need to shift (row >= start_row)
+        let cells_to_shift: Vec<((usize, usize), T)> = self
+            .iter()
+            .filter(|((row, _), _)| *row >= start_row)
+            .map(|((row, col), value)| ((row, col), value.clone()))
+            .collect();
+
+        // Remove them from the grid
+        for ((row, col), _) in &cells_to_shift {
+            self.remove(*row, *col);
+        }
+
+        // Re-insert at new positions
+        let mut shifts = Vec::with_capacity(cells_to_shift.len());
+        for ((old_row, col), value) in cells_to_shift {
+            let new_row = old_row + count;
+            self.insert(new_row, col, value);
+            shifts.push(((old_row, col), (new_row, col)));
+        }
+
+        shifts
+    }
+
+    /// Shift all rows > deleted_row up by `count` positions.
+    /// Used for deleting rows - removes rows [start_row, start_row + count) and shifts rest up.
+    ///
+    /// Returns a list of removed cells and a list of (old_coord, new_coord) for shifted cells.
+    pub fn shift_rows_up(
+        &mut self,
+        start_row: usize,
+        count: usize,
+    ) -> (Vec<(CellCoord, T)>, Vec<ShiftMapping>) {
+        if count == 0 {
+            return (Vec::new(), Vec::new());
+        }
+
+        let end_row = start_row + count;
+
+        // Collect cells in the deleted range
+        let deleted_cells: Vec<((usize, usize), T)> = self
+            .iter()
+            .filter(|((row, _), _)| *row >= start_row && *row < end_row)
+            .map(|((row, col), value)| ((row, col), value.clone()))
+            .collect();
+
+        // Collect cells that need to shift (row >= end_row)
+        let cells_to_shift: Vec<((usize, usize), T)> = self
+            .iter()
+            .filter(|((row, _), _)| *row >= end_row)
+            .map(|((row, col), value)| ((row, col), value.clone()))
+            .collect();
+
+        // Remove deleted cells
+        for ((row, col), _) in &deleted_cells {
+            self.remove(*row, *col);
+        }
+
+        // Remove cells that will shift
+        for ((row, col), _) in &cells_to_shift {
+            self.remove(*row, *col);
+        }
+
+        // Re-insert shifted cells at new positions
+        let mut shifts = Vec::with_capacity(cells_to_shift.len());
+        for ((old_row, col), value) in cells_to_shift {
+            let new_row = old_row - count;
+            self.insert(new_row, col, value);
+            shifts.push(((old_row, col), (new_row, col)));
+        }
+
+        (deleted_cells, shifts)
+    }
+
+    /// Shift all columns >= start_col right by `count` positions.
+    /// Used for inserting columns - creates a gap at start_col.
+    ///
+    /// Returns a list of (old_coord, new_coord) for affected cells.
+    pub fn shift_cols_right(&mut self, start_col: usize, count: usize) -> Vec<ShiftMapping> {
+        if count == 0 {
+            return Vec::new();
+        }
+
+        // Collect all cells that need to shift (col >= start_col)
+        let cells_to_shift: Vec<((usize, usize), T)> = self
+            .iter()
+            .filter(|((_, col), _)| *col >= start_col)
+            .map(|((row, col), value)| ((row, col), value.clone()))
+            .collect();
+
+        // Remove them from the grid
+        for ((row, col), _) in &cells_to_shift {
+            self.remove(*row, *col);
+        }
+
+        // Re-insert at new positions
+        let mut shifts = Vec::with_capacity(cells_to_shift.len());
+        for ((row, old_col), value) in cells_to_shift {
+            let new_col = old_col + count;
+            self.insert(row, new_col, value);
+            shifts.push(((row, old_col), (row, new_col)));
+        }
+
+        shifts
+    }
+
+    /// Shift all columns > deleted_col left by `count` positions.
+    /// Used for deleting columns - removes cols [start_col, start_col + count) and shifts rest left.
+    ///
+    /// Returns a list of removed cells and a list of (old_coord, new_coord) for shifted cells.
+    pub fn shift_cols_left(
+        &mut self,
+        start_col: usize,
+        count: usize,
+    ) -> (Vec<(CellCoord, T)>, Vec<ShiftMapping>) {
+        if count == 0 {
+            return (Vec::new(), Vec::new());
+        }
+
+        let end_col = start_col + count;
+
+        // Collect cells in the deleted range
+        let deleted_cells: Vec<((usize, usize), T)> = self
+            .iter()
+            .filter(|((_, col), _)| *col >= start_col && *col < end_col)
+            .map(|((row, col), value)| ((row, col), value.clone()))
+            .collect();
+
+        // Collect cells that need to shift (col >= end_col)
+        let cells_to_shift: Vec<((usize, usize), T)> = self
+            .iter()
+            .filter(|((_, col), _)| *col >= end_col)
+            .map(|((row, col), value)| ((row, col), value.clone()))
+            .collect();
+
+        // Remove deleted cells
+        for ((row, col), _) in &deleted_cells {
+            self.remove(*row, *col);
+        }
+
+        // Remove cells that will shift
+        for ((row, col), _) in &cells_to_shift {
+            self.remove(*row, *col);
+        }
+
+        // Re-insert shifted cells at new positions
+        let mut shifts = Vec::with_capacity(cells_to_shift.len());
+        for ((row, old_col), value) in cells_to_shift {
+            let new_col = old_col - count;
+            self.insert(row, new_col, value);
+            shifts.push(((row, old_col), (row, new_col)));
+        }
+
+        (deleted_cells, shifts)
+    }
 }
 
 impl<T: Clone> Default for ChunkedGrid<T> {
@@ -747,5 +917,119 @@ mod tests {
 
         assert_eq!(grid.get(5, 5), Some(&99));
         assert_eq!(grid.chunks.len(), 1); // Still same chunk
+    }
+
+    #[test]
+    fn test_shift_rows_down() {
+        let mut grid = ChunkedGrid::new();
+        grid.insert(0, 0, "A1");
+        grid.insert(1, 0, "A2");
+        grid.insert(2, 0, "A3");
+        grid.insert(0, 1, "B1");
+
+        // Insert 2 rows at row 1
+        let shifts = grid.shift_rows_down(1, 2);
+
+        // A1 stays, A2 becomes A4, A3 becomes A5, B1 stays
+        assert_eq!(grid.get(0, 0), Some(&"A1"));
+        assert_eq!(grid.get(0, 1), Some(&"B1"));
+        assert_eq!(grid.get(1, 0), None); // Gap
+        assert_eq!(grid.get(2, 0), None); // Gap
+        assert_eq!(grid.get(3, 0), Some(&"A2")); // Shifted from row 1
+        assert_eq!(grid.get(4, 0), Some(&"A3")); // Shifted from row 2
+
+        assert_eq!(shifts.len(), 2);
+    }
+
+    #[test]
+    fn test_shift_rows_up() {
+        let mut grid = ChunkedGrid::new();
+        grid.insert(0, 0, "A1");
+        grid.insert(1, 0, "A2");
+        grid.insert(2, 0, "A3");
+        grid.insert(3, 0, "A4");
+        grid.insert(4, 0, "A5");
+
+        // Delete rows 1 and 2
+        let (deleted, shifts) = grid.shift_rows_up(1, 2);
+
+        // A1 stays, A2 and A3 deleted, A4 becomes A2, A5 becomes A3
+        assert_eq!(grid.get(0, 0), Some(&"A1"));
+        assert_eq!(grid.get(1, 0), Some(&"A4")); // Shifted from row 3
+        assert_eq!(grid.get(2, 0), Some(&"A5")); // Shifted from row 4
+        assert_eq!(grid.get(3, 0), None);
+        assert_eq!(grid.get(4, 0), None);
+
+        assert_eq!(deleted.len(), 2);
+        assert_eq!(shifts.len(), 2);
+    }
+
+    #[test]
+    fn test_shift_cols_right() {
+        let mut grid = ChunkedGrid::new();
+        grid.insert(0, 0, "A1");
+        grid.insert(0, 1, "B1");
+        grid.insert(0, 2, "C1");
+
+        // Insert 2 columns at col 1
+        let shifts = grid.shift_cols_right(1, 2);
+
+        assert_eq!(grid.get(0, 0), Some(&"A1"));
+        assert_eq!(grid.get(0, 1), None); // Gap
+        assert_eq!(grid.get(0, 2), None); // Gap
+        assert_eq!(grid.get(0, 3), Some(&"B1")); // Shifted from col 1
+        assert_eq!(grid.get(0, 4), Some(&"C1")); // Shifted from col 2
+
+        assert_eq!(shifts.len(), 2);
+    }
+
+    #[test]
+    fn test_shift_cols_left() {
+        let mut grid = ChunkedGrid::new();
+        grid.insert(0, 0, "A1");
+        grid.insert(0, 1, "B1");
+        grid.insert(0, 2, "C1");
+        grid.insert(0, 3, "D1");
+        grid.insert(0, 4, "E1");
+
+        // Delete cols 1 and 2
+        let (deleted, shifts) = grid.shift_cols_left(1, 2);
+
+        assert_eq!(grid.get(0, 0), Some(&"A1"));
+        assert_eq!(grid.get(0, 1), Some(&"D1")); // Shifted from col 3
+        assert_eq!(grid.get(0, 2), Some(&"E1")); // Shifted from col 4
+        assert_eq!(grid.get(0, 3), None);
+        assert_eq!(grid.get(0, 4), None);
+
+        assert_eq!(deleted.len(), 2);
+        assert_eq!(shifts.len(), 2);
+    }
+
+    #[test]
+    fn test_shift_across_chunks() {
+        let mut grid = ChunkedGrid::new();
+        // Insert cells in different chunks (chunks are 64x64)
+        grid.insert(0, 0, 1);
+        grid.insert(63, 0, 2);  // Last row of first chunk
+        grid.insert(64, 0, 3);  // First row of second chunk
+        grid.insert(100, 0, 4);
+
+        // Insert 10 rows at row 50
+        grid.shift_rows_down(50, 10);
+
+        // Cells before row 50 stay
+        assert_eq!(grid.get(0, 0), Some(&1));
+
+        // Cells at row 63 shifted to 73
+        assert_eq!(grid.get(63, 0), None);
+        assert_eq!(grid.get(73, 0), Some(&2));
+
+        // Cells at row 64 shifted to 74
+        assert_eq!(grid.get(64, 0), None);
+        assert_eq!(grid.get(74, 0), Some(&3));
+
+        // Cells at row 100 shifted to 110
+        assert_eq!(grid.get(100, 0), None);
+        assert_eq!(grid.get(110, 0), Some(&4));
     }
 }
