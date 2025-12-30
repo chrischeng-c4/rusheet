@@ -2,7 +2,7 @@
 import './styles/main.css';
 
 // Import core modules
-import * as WasmBridge from './core/WasmBridge';
+import { rusheet } from './core/RusheetAPI';
 import GridRenderer from './canvas/GridRenderer';
 import { RenderController, isOffscreenCanvasSupported } from './worker';
 import type { IGridRenderer } from './types/renderer';
@@ -34,7 +34,7 @@ function colToLetter(col: number): string {
 async function main(): Promise<void> {
   try {
     // Step 1: Initialize WASM module
-    await WasmBridge.initWasm();
+    await rusheet.init();
 
     // Step 1.5: Initialize persistence and try to load saved data
     const persistence = new PersistenceManager();
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     }
 
     // Step 4: Create CellEditor
-    const cellEditor = new CellEditor(container, renderer, WasmBridge, formulaInput);
+    const cellEditor = new CellEditor(container, renderer, formulaInput);
 
     // Step 5: Create InputController with edit mode callback
     const editModeCallback = (row: number, col: number) => {
@@ -126,7 +126,7 @@ async function main(): Promise<void> {
     let sheetCounter = 2;
     addSheetBtn.addEventListener('click', () => {
       const sheetName = `Sheet${sheetCounter}`;
-      const newIndex = WasmBridge.addSheet(sheetName);
+      const newIndex = rusheet.addSheet(sheetName, 'user');
 
       // Create new sheet tab
       const sheetTab = document.createElement('div');
@@ -144,7 +144,7 @@ async function main(): Promise<void> {
       addSheetBtn.parentElement?.insertBefore(sheetTab, addSheetBtn);
 
       // Set as active sheet
-      WasmBridge.setActiveSheet(newIndex);
+      rusheet.setActiveSheet(newIndex, 'user');
 
       sheetCounter++;
       renderWithAddressUpdate();
@@ -163,7 +163,7 @@ async function main(): Promise<void> {
         target.classList.add('active');
 
         // Set active sheet in WASM
-        WasmBridge.setActiveSheet(index);
+        rusheet.setActiveSheet(index, 'user');
 
         renderWithAddressUpdate();
       }
@@ -244,41 +244,41 @@ async function main(): Promise<void> {
     // Step 9: Add test data to demonstrate functionality (only if no data was loaded)
     if (!hasData) {
       // Add header row
-      WasmBridge.setCellValue(0, 0, 'Product');
-      WasmBridge.setCellValue(0, 1, 'Quantity');
-      WasmBridge.setCellValue(0, 2, 'Price');
-      WasmBridge.setCellValue(0, 3, 'Total');
+      rusheet.setCellValue(0, 0, 'Product', 'api');
+      rusheet.setCellValue(0, 1, 'Quantity', 'api');
+      rusheet.setCellValue(0, 2, 'Price', 'api');
+      rusheet.setCellValue(0, 3, 'Total', 'api');
 
       // Add data rows
-      WasmBridge.setCellValue(1, 0, 'Apples');
-      WasmBridge.setCellValue(1, 1, '10');
-      WasmBridge.setCellValue(1, 2, '1.5');
-      WasmBridge.setCellValue(1, 3, '=B2*C2');
+      rusheet.setCellValue(1, 0, 'Apples', 'api');
+      rusheet.setCellValue(1, 1, '10', 'api');
+      rusheet.setCellValue(1, 2, '1.5', 'api');
+      rusheet.setCellValue(1, 3, '=B2*C2', 'api');
 
-      WasmBridge.setCellValue(2, 0, 'Oranges');
-      WasmBridge.setCellValue(2, 1, '15');
-      WasmBridge.setCellValue(2, 2, '2.0');
-      WasmBridge.setCellValue(2, 3, '=B3*C3');
+      rusheet.setCellValue(2, 0, 'Oranges', 'api');
+      rusheet.setCellValue(2, 1, '15', 'api');
+      rusheet.setCellValue(2, 2, '2.0', 'api');
+      rusheet.setCellValue(2, 3, '=B3*C3', 'api');
 
-      WasmBridge.setCellValue(3, 0, 'Bananas');
-      WasmBridge.setCellValue(3, 1, '20');
-      WasmBridge.setCellValue(3, 2, '0.75');
-      WasmBridge.setCellValue(3, 3, '=B4*C4');
+      rusheet.setCellValue(3, 0, 'Bananas', 'api');
+      rusheet.setCellValue(3, 1, '20', 'api');
+      rusheet.setCellValue(3, 2, '0.75', 'api');
+      rusheet.setCellValue(3, 3, '=B4*C4', 'api');
 
       // Add summary row
-      WasmBridge.setCellValue(4, 0, 'Total:');
-      WasmBridge.setCellValue(4, 3, '=SUM(D2:D4)');
+      rusheet.setCellValue(4, 0, 'Total:', 'api');
+      rusheet.setCellValue(4, 3, '=SUM(D2:D4)', 'api');
 
       // Format header row
-      WasmBridge.setRangeFormat(0, 0, 0, 3, {
+      rusheet.setRangeFormat(0, 0, 0, 3, {
         bold: true,
         backgroundColor: '#f0f0f0',
-      });
+      }, 'api');
 
       // Format summary row
-      WasmBridge.setRangeFormat(4, 0, 4, 3, {
+      rusheet.setRangeFormat(4, 0, 4, 3, {
         bold: true,
-      });
+      }, 'api');
     }
 
     // Step 10: Initial render

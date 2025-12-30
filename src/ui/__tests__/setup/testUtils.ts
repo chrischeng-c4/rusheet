@@ -26,7 +26,7 @@ export async function createTestEnvironment() {
   document.body.appendChild(container);
   document.body.appendChild(formulaBar);
 
-  const cellEditor = new CellEditor(container, renderer, WasmBridge, formulaBar);
+  const cellEditor = new CellEditor(container, renderer, formulaBar);
 
   // Create REAL InputController
   const editCallback = (row: number, col: number) => {

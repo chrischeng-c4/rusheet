@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import CellEditor from '../CellEditor';
 import GridRenderer from '../../canvas/GridRenderer';
-import * as WasmBridge from '../../core/WasmBridge';
 
 /**
  * UNIT TESTS (with mocks for fast execution)
@@ -16,12 +15,15 @@ import * as WasmBridge from '../../core/WasmBridge';
  * the renderer.render() bug. These mocked tests are secondary smoke tests.
  */
 
-// Mock WasmBridge
-vi.mock('../../core/WasmBridge', () => ({
-  getCellData: vi.fn(() => ({ value: '', formula: '', displayValue: '' })),
-  setCellValue: vi.fn(),
-  getColWidth: vi.fn(() => 100),
-  getRowHeight: vi.fn(() => 25),
+// Mock rusheet API
+vi.mock('../../core/RusheetAPI', () => ({
+  rusheet: {
+    getCellData: vi.fn(() => ({ value: '', formula: '', displayValue: '' })),
+    setCellValue: vi.fn(),
+    getColWidth: vi.fn(() => 100),
+    getRowHeight: vi.fn(() => 25),
+    emitCellEdit: vi.fn(),
+  },
 }));
 
 // Mock GridRenderer
@@ -53,7 +55,7 @@ describe('CellEditor - Unit Tests (Mocked)', () => {
     document.body.appendChild(formulaBar);
 
     renderer = new GridRenderer(document.createElement('canvas'));
-    cellEditor = new CellEditor(container, renderer, WasmBridge, formulaBar);
+    cellEditor = new CellEditor(container, renderer, formulaBar);
   });
 
   afterEach(() => {

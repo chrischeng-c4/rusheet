@@ -1,6 +1,16 @@
 import { emitter } from './EventEmitter';
 import * as WasmBridge from './WasmBridge';
 import type { CellData, CellFormat } from '../types';
+import type {
+  FormatChangeEvent,
+  SheetAddEvent,
+  SheetDeleteEvent,
+  SheetRenameEvent,
+  ActiveSheetChangeEvent,
+  UndoEvent,
+  RedoEvent,
+  EventSource
+} from '../types/events';
 
 export interface CellChangeEvent {
   row: number;
@@ -28,6 +38,8 @@ export class RusheetAPI {
   private static instance: RusheetAPI;
   private initialized = false;
   private currentSelection = { row: 0, col: 0 };
+  private currentSheetIndex = 0;
+  private sheetNames: string[] = ['Sheet1'];
 
   private constructor() {}
 
@@ -58,6 +70,34 @@ export class RusheetAPI {
     return emitter.on('cellEdit', callback);
   }
 
+  onFormatChange(callback: (event: FormatChangeEvent) => void): () => void {
+    return emitter.on('formatChange', callback);
+  }
+
+  onSheetAdd(callback: (event: SheetAddEvent) => void): () => void {
+    return emitter.on('sheetAdd', callback);
+  }
+
+  onSheetDelete(callback: (event: SheetDeleteEvent) => void): () => void {
+    return emitter.on('sheetDelete', callback);
+  }
+
+  onSheetRename(callback: (event: SheetRenameEvent) => void): () => void {
+    return emitter.on('sheetRename', callback);
+  }
+
+  onActiveSheetChange(callback: (event: ActiveSheetChangeEvent) => void): () => void {
+    return emitter.on('activeSheetChange', callback);
+  }
+
+  onUndo(callback: (event: UndoEvent) => void): () => void {
+    return emitter.on('undo', callback);
+  }
+
+  onRedo(callback: (event: RedoEvent) => void): () => void {
+    return emitter.on('redo', callback);
+  }
+
   // Cell operations (wrap WasmBridge and emit events)
   setCellValue(row: number, col: number, value: string, source: 'user' | 'api' = 'api'): [number, number][] {
     const oldData = WasmBridge.getCellData(row, col);
@@ -75,12 +115,29 @@ export class RusheetAPI {
     return WasmBridge.getCellData(row, col);
   }
 
-  setCellFormat(row: number, col: number, format: CellFormat): boolean {
-    return WasmBridge.setCellFormat(row, col, format);
+  setCellFormat(row: number, col: number, format: CellFormat, source: EventSource = 'api'): boolean {
+    const success = WasmBridge.setCellFormat(row, col, format);
+    if (success) {
+      emitter.emit<FormatChangeEvent>('formatChange', {
+        type: 'cell',
+        startRow: row, startCol: col,
+        endRow: row, endCol: col,
+        format, source
+      });
+    }
+    return success;
   }
 
-  setRangeFormat(startRow: number, startCol: number, endRow: number, endCol: number, format: CellFormat): boolean {
-    return WasmBridge.setRangeFormat(startRow, startCol, endRow, endCol, format);
+  setRangeFormat(startRow: number, startCol: number, endRow: number, endCol: number, format: CellFormat, source: EventSource = 'api'): boolean {
+    const success = WasmBridge.setRangeFormat(startRow, startCol, endRow, endCol, format);
+    if (success) {
+      emitter.emit<FormatChangeEvent>('formatChange', {
+        type: 'range',
+        startRow, startCol, endRow, endCol,
+        format, source
+      });
+    }
+    return success;
   }
 
   clearRange(startRow: number, startCol: number, endRow: number, endCol: number): [number, number][] {
@@ -138,11 +195,16 @@ export class RusheetAPI {
   // Undo/Redo (emit events)
   undo(): [number, number][] {
     const affected = WasmBridge.undo();
+
+    // Emit undo event
+    emitter.emit<UndoEvent>('undo', { affectedCells: affected });
+
+    // Also emit change events for each cell
     affected.forEach(([row, col]) => {
       const newData = WasmBridge.getCellData(row, col);
       emitter.emit<CellChangeEvent>('change', {
         row, col,
-        oldValue: null, // We don't track this for undo
+        oldValue: null,
         newValue: newData?.value ?? null,
         source: 'undo'
       });
@@ -152,6 +214,11 @@ export class RusheetAPI {
 
   redo(): [number, number][] {
     const affected = WasmBridge.redo();
+
+    // Emit redo event
+    emitter.emit<RedoEvent>('redo', { affectedCells: affected });
+
+    // Also emit change events for each cell
     affected.forEach(([row, col]) => {
       const newData = WasmBridge.getCellData(row, col);
       emitter.emit<CellChangeEvent>('change', {
@@ -172,12 +239,50 @@ export class RusheetAPI {
   deserialize(json: string): boolean { return WasmBridge.deserialize(json); }
 
   // Sheet management (pass through)
-  addSheet(name: string): number { return WasmBridge.addSheet(name); }
-  setActiveSheet(index: number): boolean { return WasmBridge.setActiveSheet(index); }
+  addSheet(name: string, source: EventSource = 'api'): number {
+    const index = WasmBridge.addSheet(name);
+    this.sheetNames = WasmBridge.getSheetNames();
+    emitter.emit<SheetAddEvent>('sheetAdd', { index, name, source });
+    return index;
+  }
+
+  setActiveSheet(index: number, source: EventSource = 'api'): boolean {
+    const previousIndex = this.currentSheetIndex;
+    const previousName = this.sheetNames[previousIndex] ?? 'Sheet1';
+    const success = WasmBridge.setActiveSheet(index);
+    if (success) {
+      this.currentSheetIndex = index;
+      this.sheetNames = WasmBridge.getSheetNames();
+      const newName = this.sheetNames[index] ?? 'Sheet1';
+      emitter.emit<ActiveSheetChangeEvent>('activeSheetChange', {
+        previousIndex, newIndex: index, previousName, newName, source
+      });
+    }
+    return success;
+  }
+
   getSheetNames(): string[] { return WasmBridge.getSheetNames(); }
   getActiveSheetIndex(): number { return WasmBridge.getActiveSheetIndex(); }
-  renameSheet(index: number, name: string): boolean { return WasmBridge.renameSheet(index, name); }
-  deleteSheet(index: number): boolean { return WasmBridge.deleteSheet(index); }
+
+  renameSheet(index: number, newName: string, source: EventSource = 'api'): boolean {
+    const oldName = this.sheetNames[index] ?? '';
+    const success = WasmBridge.renameSheet(index, newName);
+    if (success) {
+      this.sheetNames = WasmBridge.getSheetNames();
+      emitter.emit<SheetRenameEvent>('sheetRename', { index, oldName, newName, source });
+    }
+    return success;
+  }
+
+  deleteSheet(index: number, source: EventSource = 'api'): boolean {
+    const name = this.sheetNames[index] ?? '';
+    const success = WasmBridge.deleteSheet(index);
+    if (success) {
+      this.sheetNames = WasmBridge.getSheetNames();
+      emitter.emit<SheetDeleteEvent>('sheetDelete', { index, name, source });
+    }
+    return success;
+  }
 
   // Row/Col sizing (pass through)
   setRowHeight(row: number, height: number): void { WasmBridge.setRowHeight(row, height); }

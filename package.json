@@ -2,9 +2,24 @@
   "name": "rusheet",
   "version": "0.1.0",
   "type": "module",
+  "main": "./dist/rusheet.umd.js",
+  "module": "./dist/rusheet.es.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/rusheet.es.js",
+      "require": "./dist/rusheet.umd.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "pkg"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "pnpm run build:wasm && vite build",
+    "build:lib": "pnpm run build:wasm && vite build --config vite.config.lib.ts",
     "build:wasm": "wasm-pack build crates/rusheet-wasm --target web --out-dir ../../pkg",
     "preview": "vite preview",
     "test": "vitest run",

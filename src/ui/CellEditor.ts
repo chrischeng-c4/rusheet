@@ -1,5 +1,4 @@
 import type { IGridRenderer } from '../types/renderer';
-import * as WasmBridge from '../core/WasmBridge';
 import { rusheet } from '../core/RusheetAPI';
 import { theme } from '../canvas/theme';
 import { AutocompleteEngine } from './AutocompleteEngine';
@@ -8,7 +7,6 @@ import { AutocompleteUI } from './AutocompleteUI';
 export default class CellEditor {
   private container: HTMLElement;
   private renderer: IGridRenderer;
-  private bridge: typeof WasmBridge;
   private formulaBar: HTMLInputElement;
   private textarea: HTMLTextAreaElement;
   private isEditing: boolean = false;
@@ -23,12 +21,10 @@ export default class CellEditor {
   constructor(
     container: HTMLElement,
     renderer: IGridRenderer,
-    bridge: typeof WasmBridge,
     formulaBar: HTMLInputElement
   ) {
     this.container = container;
     this.renderer = renderer;
-    this.bridge = bridge;
     this.formulaBar = formulaBar;
     this.textarea = this.createTextarea();
     this.autocompleteEngine = new AutocompleteEngine();
@@ -272,7 +268,7 @@ export default class CellEditor {
     // Get current cell value for editing
     // For formulas: show the formula expression (e.g., "=SUM(A1:B10)")
     // For regular values: show the original input (e.g., "10", "Hello")
-    const cellData = this.bridge.getCellData(row, col);
+    const cellData = rusheet.getCellData(row, col);
     const value = cellData?.formula || cellData?.value || '';
 
     // Set values
@@ -300,8 +296,8 @@ export default class CellEditor {
    */
   private positionTextarea(row: number, col: number): void {
     const pos = this.renderer.gridToScreen(row, col);
-    const colWidth = this.bridge.getColWidth(col);
-    const rowHeight = this.bridge.getRowHeight(row);
+    const colWidth = rusheet.getColWidth(col);
+    const rowHeight = rusheet.getRowHeight(row);
 
     this.textarea.style.left = `${pos.x}px`;
     this.textarea.style.top = `${pos.y}px`;
@@ -319,8 +315,8 @@ export default class CellEditor {
     const row = this.currentRow;
     const col = this.currentCol;
 
-    // Save value via bridge
-    this.bridge.setCellValue(row, col, value);
+    // Save value via rusheet API
+    rusheet.setCellValue(row, col, value, 'user');
 
     // Emit cell edit end event
     rusheet.emitCellEdit(row, col, value, 'end');
@@ -342,7 +338,7 @@ export default class CellEditor {
     const col = this.currentCol;
 
     // Restore original value to formula bar
-    const cellData = this.bridge.getCellData(row, col);
+    const cellData = rusheet.getCellData(row, col);
     const value = cellData?.formula || cellData?.value || '';
     this.formulaBar.value = value;
 
