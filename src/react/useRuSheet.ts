@@ -1,5 +1,5 @@
 import { useRef, useCallback } from 'react';
-import type { RuSheetRef } from './RuSheet';
+import type { RuSheetRef, CSVExportOptions, CSVImportOptions, XLSXExportOptions, XLSXImportOptions } from './RuSheet';
 
 /**
  * Custom hook for easier RuSheet ref management
@@ -106,6 +106,82 @@ export function useRuSheet() {
       []
     ),
     render: useCallback(() => ref.current?.render(), []),
+    // CSV Import/Export
+    exportCSV: useCallback(
+      (options?: CSVExportOptions) => ref.current?.exportCSV(options) ?? '',
+      []
+    ),
+    importCSV: useCallback(
+      (csvString: string, options?: CSVImportOptions) =>
+        ref.current?.importCSV(csvString, options) ?? { rows: 0, cols: 0 },
+      []
+    ),
+    downloadCSV: useCallback(
+      (filename?: string, options?: CSVExportOptions) =>
+        ref.current?.downloadCSV(filename, options),
+      []
+    ),
+    importCSVFile: useCallback(
+      async (file: File, options?: CSVImportOptions) =>
+        ref.current?.importCSVFile(file, options) ?? { rows: 0, cols: 0 },
+      []
+    ),
+    // XLSX Import/Export
+    exportXLSX: useCallback(
+      (options?: XLSXExportOptions) => ref.current?.exportXLSX(options) ?? new ArrayBuffer(0),
+      []
+    ),
+    importXLSX: useCallback(
+      (buffer: ArrayBuffer, options?: XLSXImportOptions) =>
+        ref.current?.importXLSX(buffer, options) ?? { rows: 0, cols: 0, sheetName: '' },
+      []
+    ),
+    downloadXLSX: useCallback(
+      (filename?: string, options?: XLSXExportOptions) =>
+        ref.current?.downloadXLSX(filename, options),
+      []
+    ),
+    importXLSXFile: useCallback(
+      async (file: File, options?: XLSXImportOptions) =>
+        ref.current?.importXLSXFile(file, options) ?? { rows: 0, cols: 0, sheetName: '' },
+      []
+    ),
+    getXLSXSheetNames: useCallback(
+      (buffer: ArrayBuffer) => ref.current?.getXLSXSheetNames(buffer) ?? [],
+      []
+    ),
+    sortRange: useCallback(
+      (
+        startRow: number,
+        endRow: number,
+        startCol: number,
+        endCol: number,
+        sortCol: number,
+        ascending: boolean
+      ) => ref.current?.sortRange(startRow, endRow, startCol, endCol, sortCol, ascending) ?? [],
+      []
+    ),
+    mergeCells: useCallback(
+      (startRow: number, startCol: number, endRow: number, endCol: number) =>
+        ref.current?.mergeCells(startRow, startCol, endRow, endCol) ?? [],
+      []
+    ),
+    unmergeCells: useCallback(
+      (row: number, col: number) => ref.current?.unmergeCells(row, col) ?? [],
+      []
+    ),
+    getMergedRanges: useCallback(
+      () => ref.current?.getMergedRanges() ?? [],
+      []
+    ),
+    isMergedSlave: useCallback(
+      (row: number, col: number) => ref.current?.isMergedSlave(row, col) ?? false,
+      []
+    ),
+    getMergeInfo: useCallback(
+      (row: number, col: number) => ref.current?.getMergeInfo(row, col) ?? null,
+      []
+    ),
   };
 
   return { ref, api };

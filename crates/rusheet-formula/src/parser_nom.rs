@@ -156,6 +156,30 @@ fn parse_identifier(input: &str) -> IResult<&str, &str> {
     take_while1(|c: char| c.is_ascii_alphanumeric() || c == '_')(input)
 }
 
+/// Parse a sheet name (quoted or unquoted)
+/// Examples: Sheet1, 'Sheet Name', 'Sheet''s Data'
+fn parse_sheet_name(input: &str) -> IResult<&str, String> {
+    alt((
+        // Quoted sheet name: 'Sheet Name' or 'Sheet''s Data'
+        map(
+            delimited(
+                char('\''),
+                recognize(many0(alt((
+                    take_while1(|c: char| c != '\''),
+                    map(tag("''"), |_| "'"), // escaped quote
+                )))),
+                char('\''),
+            ),
+            |s: &str| s.replace("''", "'"),
+        ),
+        // Unquoted sheet name: alphanumeric and underscores
+        map(
+            take_while1(|c: char| c.is_ascii_alphanumeric() || c == '_'),
+            |s: &str| s.to_string(),
+        ),
+    ))(input)
+}
+
 
 // =============================================================================
 // Operator Parsers
@@ -217,8 +241,35 @@ fn parse_primary(input: &str) -> IResult<&str, Expr> {
     ))(input)
 }
 
-/// Parse either a cell reference, range, or function call
+/// Parse either a cell reference, range, sheet reference, or function call
 fn parse_cell_ref_or_function(input: &str) -> IResult<&str, Expr> {
+    // First, try to parse as sheet reference (Sheet1!A1 or 'Sheet Name'!A1:B2)
+    if let Ok((remaining, sheet_name)) = parse_sheet_name(input) {
+        // Check for ! after sheet name
+        if let Ok((remaining, _)) = char::<&str, nom::error::Error<&str>>('!')(remaining) {
+            // Parse the cell reference or range after !
+            if let Ok((remaining, cell_ref)) = parse_cell_ref(remaining) {
+                // Check if followed by a colon (range)
+                let (remaining, _) = multispace0(remaining)?;
+                if let Ok((remaining, _)) = char::<&str, nom::error::Error<&str>>(':')(remaining) {
+                    let (remaining, _) = multispace0(remaining)?;
+                    let (remaining, end_ref) = parse_cell_ref(remaining)?;
+                    return Ok((remaining, Expr::SheetRef {
+                        sheet_name,
+                        reference: Box::new(Expr::Range {
+                            start: Box::new(cell_ref),
+                            end: Box::new(end_ref),
+                        }),
+                    }));
+                }
+                return Ok((remaining, Expr::SheetRef {
+                    sheet_name,
+                    reference: Box::new(cell_ref),
+                }));
+            }
+        }
+    }
+
     // Try to parse as cell reference first
     if let Ok((remaining, cell_ref)) = parse_cell_ref(input) {
         // Check if followed by a colon (range)
@@ -606,5 +657,54 @@ mod tests {
     fn test_with_leading_equals() {
         assert_eq!(parse("=123"), Ok(Expr::Number(123.0)));
         assert_eq!(parse("=A1"), Ok(Expr::CellRef { col: 0, row: 0, abs_col: false, abs_row: false }));
+    }
+
+    #[test]
+    fn test_sheet_reference() {
+        let result = parse("Sheet1!A1");
+        assert!(result.is_ok());
+        if let Ok(Expr::SheetRef { sheet_name, reference }) = result {
+            assert_eq!(sheet_name, "Sheet1");
+            assert!(matches!(*reference, Expr::CellRef { col: 0, row: 0, .. }));
+        } else {
+            panic!("Expected SheetRef");
+        }
+    }
+
+    #[test]
+    fn test_sheet_reference_range() {
+        let result = parse("Sheet2!A1:B5");
+        assert!(result.is_ok());
+        if let Ok(Expr::SheetRef { sheet_name, reference }) = result {
+            assert_eq!(sheet_name, "Sheet2");
+            assert!(matches!(*reference, Expr::Range { .. }));
+        } else {
+            panic!("Expected SheetRef with Range");
+        }
+    }
+
+    #[test]
+    fn test_quoted_sheet_reference() {
+        let result = parse("'My Sheet'!C3");
+        assert!(result.is_ok());
+        if let Ok(Expr::SheetRef { sheet_name, reference }) = result {
+            assert_eq!(sheet_name, "My Sheet");
+            assert!(matches!(*reference, Expr::CellRef { col: 2, row: 2, .. }));
+        } else {
+            panic!("Expected SheetRef");
+        }
+    }
+
+    #[test]
+    fn test_sheet_in_function() {
+        let result = parse("SUM(Sheet1!A1:A10)");
+        assert!(result.is_ok());
+        if let Ok(Expr::FunctionCall { name, args }) = result {
+            assert_eq!(name, "SUM");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(&args[0], Expr::SheetRef { .. }));
+        } else {
+            panic!("Expected FunctionCall with SheetRef");
+        }
     }
 }

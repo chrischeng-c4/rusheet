@@ -1,3 +1,5 @@
+import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import { emitter } from './EventEmitter';
 import * as WasmBridge from './WasmBridge';
 import type { CellData, CellFormat } from '../types';
@@ -13,7 +15,10 @@ import type {
   RowsInsertEvent,
   RowsDeleteEvent,
   ColsInsertEvent,
-  ColsDeleteEvent
+  ColsDeleteEvent,
+  SortRangeEvent,
+  MergeCellsEvent,
+  UnmergeCellsEvent
 } from '../types/events';
 
 export interface CellChangeEvent {
@@ -116,6 +121,18 @@ export class RusheetAPI {
 
   onColsDelete(callback: (event: ColsDeleteEvent) => void): () => void {
     return emitter.on('colsDelete', callback);
+  }
+
+  onSortRange(callback: (event: SortRangeEvent) => void): () => void {
+    return emitter.on('sortRange', callback);
+  }
+
+  onMergeCells(callback: (event: MergeCellsEvent) => void): () => void {
+    return emitter.on('mergeCells', callback);
+  }
+
+  onUnmergeCells(callback: (event: UnmergeCellsEvent) => void): () => void {
+    return emitter.on('unmergeCells', callback);
   }
 
   // Cell operations (wrap WasmBridge and emit events)
@@ -258,6 +275,330 @@ export class RusheetAPI {
   serialize(): string { return WasmBridge.serialize(); }
   deserialize(json: string): boolean { return WasmBridge.deserialize(json); }
 
+  // CSV Import/Export
+  /**
+   * Export spreadsheet data as CSV string
+   * @param options - CSV export options
+   * @returns CSV string
+   */
+  exportCSV(options: {
+    delimiter?: string;
+    startRow?: number;
+    endRow?: number;
+    startCol?: number;
+    endCol?: number;
+    includeEmptyRows?: boolean;
+  } = {}): string {
+    const {
+      delimiter = ',',
+      startRow = 0,
+      endRow = 999,
+      startCol = 0,
+      endCol = 25,
+      includeEmptyRows = false
+    } = options;
+
+    const data = this.getData(startRow, endRow, startCol, endCol);
+
+    // Trim trailing empty rows
+    let lastNonEmptyRow = data.length - 1;
+    if (!includeEmptyRows) {
+      while (lastNonEmptyRow >= 0 && data[lastNonEmptyRow].every(cell => cell === null || cell === '')) {
+        lastNonEmptyRow--;
+      }
+    }
+
+    // Trim trailing empty columns
+    let maxCol = 0;
+    for (let row = 0; row <= lastNonEmptyRow; row++) {
+      for (let col = data[row].length - 1; col >= 0; col--) {
+        if (data[row][col] !== null && data[row][col] !== '') {
+          maxCol = Math.max(maxCol, col);
+          break;
+        }
+      }
+    }
+
+    const trimmedData = data
+      .slice(0, lastNonEmptyRow + 1)
+      .map(row => row.slice(0, maxCol + 1).map(cell => cell ?? ''));
+
+    return Papa.unparse(trimmedData, { delimiter });
+  }
+
+  /**
+   * Import CSV data into spreadsheet
+   * @param csvString - CSV string to import
+   * @param options - CSV import options
+   * @returns Number of rows imported
+   */
+  importCSV(csvString: string, options: {
+    delimiter?: string;
+    startRow?: number;
+    startCol?: number;
+    clearExisting?: boolean;
+  } = {}): { rows: number; cols: number } {
+    const {
+      delimiter = ',',
+      startRow = 0,
+      startCol = 0,
+      clearExisting = true
+    } = options;
+
+    const result = Papa.parse<string[]>(csvString, {
+      delimiter,
+      skipEmptyLines: false
+    });
+
+    if (result.errors.length > 0) {
+      console.warn('CSV parse warnings:', result.errors);
+    }
+
+    const data = result.data;
+
+    // Clear existing data if requested
+    if (clearExisting) {
+      const maxRows = Math.max(data.length, 100);
+      const maxCols = Math.max(data[0]?.length ?? 0, 26);
+      WasmBridge.clearRange(0, 0, maxRows, maxCols);
+    }
+
+    // Import data
+    let maxColCount = 0;
+    for (let row = 0; row < data.length; row++) {
+      const rowData = data[row];
+      maxColCount = Math.max(maxColCount, rowData.length);
+      for (let col = 0; col < rowData.length; col++) {
+        const value = rowData[col];
+        if (value !== null && value !== undefined && value !== '') {
+          WasmBridge.setCellValue(startRow + row, startCol + col, value);
+        }
+      }
+    }
+
+    emitter.emit('dataLoaded', { rows: data.length, cols: maxColCount, source: 'csv' });
+
+    return { rows: data.length, cols: maxColCount };
+  }
+
+  /**
+   * Download spreadsheet as CSV file
+   * @param filename - Name of the file (default: 'spreadsheet.csv')
+   * @param options - CSV export options
+   */
+  downloadCSV(filename = 'spreadsheet.csv', options: Parameters<typeof this.exportCSV>[0] = {}): void {
+    const csv = this.exportCSV(options);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename.endsWith('.csv') ? filename : `${filename}.csv`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Import CSV from File object
+   * @param file - File object from input or drag-drop
+   * @param options - CSV import options
+   * @returns Promise resolving to import stats
+   */
+  async importCSVFile(file: File, options: Parameters<typeof this.importCSV>[1] = {}): Promise<{ rows: number; cols: number }> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const csvString = e.target?.result as string;
+        if (csvString) {
+          const stats = this.importCSV(csvString, options);
+          resolve(stats);
+        } else {
+          reject(new Error('Failed to read file'));
+        }
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(file);
+    });
+  }
+
+  // XLSX Import/Export
+  /**
+   * Export spreadsheet data as XLSX ArrayBuffer
+   * @param options - XLSX export options
+   * @returns ArrayBuffer containing XLSX file data
+   */
+  exportXLSX(options: {
+    sheetName?: string;
+    startRow?: number;
+    endRow?: number;
+    startCol?: number;
+    endCol?: number;
+  } = {}): ArrayBuffer {
+    const {
+      sheetName = 'Sheet1',
+      startRow = 0,
+      endRow = 999,
+      startCol = 0,
+      endCol = 25,
+    } = options;
+
+    const data = this.getData(startRow, endRow, startCol, endCol);
+
+    // Trim trailing empty rows
+    let lastNonEmptyRow = data.length - 1;
+    while (lastNonEmptyRow >= 0 && data[lastNonEmptyRow].every(cell => cell === null || cell === '')) {
+      lastNonEmptyRow--;
+    }
+
+    // Trim trailing empty columns
+    let maxCol = 0;
+    for (let row = 0; row <= lastNonEmptyRow; row++) {
+      for (let col = data[row].length - 1; col >= 0; col--) {
+        if (data[row][col] !== null && data[row][col] !== '') {
+          maxCol = Math.max(maxCol, col);
+          break;
+        }
+      }
+    }
+
+    const trimmedData = data
+      .slice(0, lastNonEmptyRow + 1)
+      .map(row => row.slice(0, maxCol + 1).map(cell => cell ?? ''));
+
+    // Create workbook
+    const ws = XLSX.utils.aoa_to_sheet(trimmedData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+    // Write to buffer
+    const buffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    return buffer;
+  }
+
+  /**
+   * Import XLSX data from ArrayBuffer
+   * @param buffer - ArrayBuffer containing XLSX file data
+   * @param options - XLSX import options
+   * @returns Import statistics
+   */
+  importXLSX(buffer: ArrayBuffer, options: {
+    sheetIndex?: number;
+    sheetName?: string;
+    startRow?: number;
+    startCol?: number;
+    clearExisting?: boolean;
+  } = {}): { rows: number; cols: number; sheetName: string } {
+    const {
+      sheetIndex = 0,
+      sheetName,
+      startRow = 0,
+      startCol = 0,
+      clearExisting = true
+    } = options;
+
+    // Parse workbook
+    const wb = XLSX.read(buffer, { type: 'array' });
+
+    // Get sheet
+    const targetSheetName = sheetName || wb.SheetNames[sheetIndex];
+    if (!targetSheetName || !wb.Sheets[targetSheetName]) {
+      throw new Error(`Sheet not found: ${sheetName || `index ${sheetIndex}`}`);
+    }
+
+    const ws = wb.Sheets[targetSheetName];
+
+    // Convert to 2D array
+    const data: (string | number | null)[][] = XLSX.utils.sheet_to_json(ws, {
+      header: 1,
+      defval: null,
+      raw: false // Convert all to strings for consistency
+    });
+
+    // Clear existing data if requested
+    if (clearExisting) {
+      const maxRows = Math.max(data.length, 100);
+      const maxCols = Math.max(data[0]?.length ?? 0, 26);
+      WasmBridge.clearRange(0, 0, maxRows, maxCols);
+    }
+
+    // Import data
+    let maxColCount = 0;
+    for (let row = 0; row < data.length; row++) {
+      const rowData = data[row] || [];
+      maxColCount = Math.max(maxColCount, rowData.length);
+      for (let col = 0; col < rowData.length; col++) {
+        const value = rowData[col];
+        if (value !== null && value !== undefined && value !== '') {
+          WasmBridge.setCellValue(startRow + row, startCol + col, String(value));
+        }
+      }
+    }
+
+    emitter.emit('dataLoaded', { rows: data.length, cols: maxColCount, source: 'xlsx', sheetName: targetSheetName });
+
+    return { rows: data.length, cols: maxColCount, sheetName: targetSheetName };
+  }
+
+  /**
+   * Download spreadsheet as XLSX file
+   * @param filename - Name of the file (default: 'spreadsheet.xlsx')
+   * @param options - XLSX export options
+   */
+  downloadXLSX(filename = 'spreadsheet.xlsx', options: Parameters<typeof this.exportXLSX>[0] = {}): void {
+    const buffer = this.exportXLSX(options);
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Import XLSX from File object
+   * @param file - File object from input or drag-drop
+   * @param options - XLSX import options
+   * @returns Promise resolving to import stats
+   */
+  async importXLSXFile(file: File, options: Parameters<typeof this.importXLSX>[1] = {}): Promise<{ rows: number; cols: number; sheetName: string }> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const buffer = e.target?.result as ArrayBuffer;
+        if (buffer) {
+          try {
+            const stats = this.importXLSX(buffer, options);
+            resolve(stats);
+          } catch (error) {
+            reject(error);
+          }
+        } else {
+          reject(new Error('Failed to read file'));
+        }
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  /**
+   * Get sheet names from an XLSX file
+   * @param buffer - ArrayBuffer containing XLSX file data
+   * @returns Array of sheet names
+   */
+  getXLSXSheetNames(buffer: ArrayBuffer): string[] {
+    const wb = XLSX.read(buffer, { type: 'array' });
+    return wb.SheetNames;
+  }
+
   // Sheet management (pass through)
   addSheet(name: string, source: EventSource = 'api'): number {
     const index = WasmBridge.addSheet(name);
@@ -333,6 +674,64 @@ export class RusheetAPI {
     const affected = WasmBridge.deleteCols(atCol, count);
     emitter.emit<ColsDeleteEvent>('colsDelete', { atCol, count, affectedCells: affected, source });
     return affected;
+  }
+
+  // Sorting
+  sortRange(
+    startRow: number,
+    endRow: number,
+    startCol: number,
+    endCol: number,
+    sortCol: number,
+    ascending: boolean,
+    source: EventSource = 'api'
+  ): [number, number][] {
+    const affected = WasmBridge.sortRange(startRow, endRow, startCol, endCol, sortCol, ascending);
+    emitter.emit<SortRangeEvent>('sortRange', {
+      startRow, endRow, startCol, endCol, sortCol, ascending,
+      affectedCells: affected, source
+    });
+    return affected;
+  }
+
+  // Cell Merging
+  mergeCells(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number,
+    source: EventSource = 'api'
+  ): [number, number][] {
+    const affected = WasmBridge.mergeCells(startRow, startCol, endRow, endCol);
+    if (affected.length > 0) {
+      emitter.emit<MergeCellsEvent>('mergeCells', {
+        startRow, startCol, endRow, endCol,
+        affectedCells: affected, source
+      });
+    }
+    return affected;
+  }
+
+  unmergeCells(row: number, col: number, source: EventSource = 'api'): [number, number][] {
+    const affected = WasmBridge.unmergeCells(row, col);
+    if (affected.length > 0) {
+      emitter.emit<UnmergeCellsEvent>('unmergeCells', {
+        row, col, affectedCells: affected, source
+      });
+    }
+    return affected;
+  }
+
+  getMergedRanges(): WasmBridge.MergeRange[] {
+    return WasmBridge.getMergedRanges();
+  }
+
+  isMergedSlave(row: number, col: number): boolean {
+    return WasmBridge.isMergedSlave(row, col);
+  }
+
+  getMergeInfo(row: number, col: number): WasmBridge.MergeInfo | null {
+    return WasmBridge.getMergeInfo(row, col);
   }
 
   // Viewport (pass through)

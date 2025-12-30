@@ -1,4 +1,4 @@
-use rusheet_core::{Cell, CellContent, CellCoord, CellFormat, CellValue, Sheet};
+use rusheet_core::{Cell, CellContent, CellCoord, CellFormat, CellRange, CellValue, Sheet};
 use rusheet_formula::{shift_formula_rows, shift_formula_cols};
 
 /// Type alias for boxed commands
@@ -857,6 +857,245 @@ impl Command for DeleteColsCommand {
 
     fn description(&self) -> &str {
         "Delete columns"
+    }
+}
+
+/// Sort a range of rows by a specific column
+#[derive(Debug)]
+pub struct SortRangeCommand {
+    start_row: u32,
+    end_row: u32,
+    start_col: u32,
+    end_col: u32,
+    sort_col: u32,
+    ascending: bool,
+    // For undo: stores the original row order
+    row_mapping: Vec<(u32, u32)>,
+}
+
+impl SortRangeCommand {
+    pub fn new(
+        start_row: u32,
+        end_row: u32,
+        start_col: u32,
+        end_col: u32,
+        sort_col: u32,
+        ascending: bool,
+    ) -> Self {
+        Self {
+            start_row,
+            end_row,
+            start_col,
+            end_col,
+            sort_col,
+            ascending,
+            row_mapping: Vec::new(),
+        }
+    }
+}
+
+impl Command for SortRangeCommand {
+    fn execute(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        // Perform the sort and store the mapping for undo
+        self.row_mapping = sheet.sort_range(
+            self.start_row,
+            self.end_row,
+            self.start_col,
+            self.end_col,
+            self.sort_col,
+            self.ascending,
+        );
+
+        // Return all cells in the sorted range as affected
+        let mut affected = Vec::new();
+        for row in self.start_row..=self.end_row {
+            for col in self.start_col..=self.end_col {
+                affected.push(CellCoord::new(row, col));
+            }
+        }
+        affected
+    }
+
+    fn undo(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        // Restore original row order using the stored mapping
+        sheet.unsort_range(
+            self.start_row,
+            self.end_row,
+            self.start_col,
+            self.end_col,
+            &self.row_mapping,
+        );
+
+        // Return all cells in the range as affected
+        let mut affected = Vec::new();
+        for row in self.start_row..=self.end_row {
+            for col in self.start_col..=self.end_col {
+                affected.push(CellCoord::new(row, col));
+            }
+        }
+        affected
+    }
+
+    fn description(&self) -> &str {
+        if self.ascending {
+            "Sort ascending"
+        } else {
+            "Sort descending"
+        }
+    }
+}
+
+/// Merge cells in a range
+#[derive(Debug)]
+pub struct MergeCellsCommand {
+    range: CellRange,
+    // For undo: store the original cell contents that were cleared
+    cleared_cells: Vec<(CellCoord, CellContent)>,
+    // Store whether merge was successful
+    success: bool,
+}
+
+impl MergeCellsCommand {
+    pub fn new(range: CellRange) -> Self {
+        Self {
+            range,
+            cleared_cells: Vec::new(),
+            success: false,
+        }
+    }
+
+    /// Create from start/end coordinates
+    pub fn from_coords(start_row: u32, start_col: u32, end_row: u32, end_col: u32) -> Self {
+        Self::new(CellRange::new(
+            CellCoord::new(start_row, start_col),
+            CellCoord::new(end_row, end_col),
+        ))
+    }
+}
+
+impl Command for MergeCellsCommand {
+    fn execute(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        self.cleared_cells.clear();
+
+        // Don't merge single cells
+        if self.range.is_single_cell() {
+            self.success = false;
+            return Vec::new();
+        }
+
+        // Check for overlap with existing merges
+        if sheet.would_overlap_merge(&self.range) {
+            self.success = false;
+            return Vec::new();
+        }
+
+        let master = self.range.start;
+
+        // Collect cells to clear (non-master cells with content)
+        for coord in self.range.iter() {
+            if coord != master {
+                if let Some(cell) = sheet.get_cell(coord) {
+                    if !cell.content.is_empty() {
+                        self.cleared_cells.push((coord, cell.content.clone()));
+                    }
+                }
+            }
+        }
+
+        // Perform the merge
+        self.success = sheet.merge_cells(self.range);
+
+        if self.success {
+            // Return all cells in the merged range as affected
+            self.range.iter().collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn undo(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        if !self.success {
+            return Vec::new();
+        }
+
+        // Unmerge first
+        sheet.unmerge_cells(self.range);
+
+        // Restore cleared cells
+        for (coord, content) in &self.cleared_cells {
+            let cell = sheet.get_cell_mut(*coord);
+            cell.content = content.clone();
+        }
+
+        self.range.iter().collect()
+    }
+
+    fn description(&self) -> &str {
+        "Merge cells"
+    }
+}
+
+/// Unmerge cells
+#[derive(Debug)]
+pub struct UnmergeCellsCommand {
+    range: CellRange,
+    // For undo: store the original merged range
+    original_merge: Option<CellRange>,
+    success: bool,
+}
+
+impl UnmergeCellsCommand {
+    pub fn new(range: CellRange) -> Self {
+        Self {
+            range,
+            original_merge: None,
+            success: false,
+        }
+    }
+
+    /// Create from a coordinate (will unmerge the merge containing this coord)
+    pub fn from_coord(coord: CellCoord) -> Self {
+        Self::new(CellRange::new(coord, coord))
+    }
+}
+
+impl Command for UnmergeCellsCommand {
+    fn execute(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        // Find the merge containing the range start
+        if let Some(merge) = sheet.get_merge_at(self.range.start) {
+            self.original_merge = Some(*merge);
+            let affected_range = *merge;
+
+            // Unmerge
+            self.success = sheet.unmerge_cells(self.range);
+
+            if self.success {
+                affected_range.iter().collect()
+            } else {
+                Vec::new()
+            }
+        } else {
+            self.success = false;
+            Vec::new()
+        }
+    }
+
+    fn undo(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        if !self.success {
+            return Vec::new();
+        }
+
+        // Re-merge the original range
+        if let Some(merge) = self.original_merge {
+            sheet.merge_cells(merge);
+            merge.iter().collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn description(&self) -> &str {
+        "Unmerge cells"
     }
 }
 

@@ -220,6 +220,28 @@ export default class GridRenderer {
   }
 
   /**
+   * Calculate the total width of merged columns
+   */
+  private getMergedWidth(startCol: number, colSpan: number): number {
+    let width = 0;
+    for (let c = startCol; c < startCol + colSpan; c++) {
+      width += WasmBridge.getColWidth(c);
+    }
+    return width;
+  }
+
+  /**
+   * Calculate the total height of merged rows
+   */
+  private getMergedHeight(startRow: number, rowSpan: number): number {
+    let height = 0;
+    for (let r = startRow; r < startRow + rowSpan; r++) {
+      height += WasmBridge.getRowHeight(r);
+    }
+    return height;
+  }
+
+  /**
    * Render cell content
    */
   private renderCellContent(range: {
@@ -236,19 +258,62 @@ export default class GridRenderer {
       range.endCol
     );
 
+    // Get merged ranges for the viewport
+    const mergedRanges = WasmBridge.getMergedRanges();
+
+    // First, render backgrounds for merged cells (including empty merged cells)
+    for (const merge of mergedRanges) {
+      // Check if merge is in viewport
+      if (merge.endRow < range.startRow || merge.startRow > range.endRow ||
+          merge.endCol < range.startCol || merge.startCol > range.endCol) {
+        continue;
+      }
+
+      const pos = this.gridToScreen(merge.startRow, merge.startCol);
+      const mergedWidth = this.getMergedWidth(merge.startCol, merge.endCol - merge.startCol + 1);
+      const mergedHeight = this.getMergedHeight(merge.startRow, merge.endRow - merge.startRow + 1);
+
+      // Get master cell data for background
+      const masterCell = cellsData.find(c => c.row === merge.startRow && c.col === merge.startCol);
+
+      // Draw white background to cover grid lines inside merge
+      ctx.fillStyle = masterCell?.format.backgroundColor || theme.backgroundColor;
+      ctx.fillRect(pos.x + 1, pos.y + 1, mergedWidth - 1, mergedHeight - 1);
+    }
+
     for (const cellData of cellsData) {
-      if (!cellData.displayValue) continue;
-
       const { row, col } = cellData;
-      const pos = this.gridToScreen(row, col);
-      const colWidth = WasmBridge.getColWidth(col);
-      const rowHeight = WasmBridge.getRowHeight(row);
 
-      // Apply cell background color if set
+      // Skip slave cells (non-master cells in a merged range)
+      if (WasmBridge.isMergedSlave(row, col)) {
+        continue;
+      }
+
+      // Get merge info to determine if this is a master cell
+      const mergeInfo = WasmBridge.getMergeInfo(row, col);
+
+      const pos = this.gridToScreen(row, col);
+      let cellWidth: number;
+      let cellHeight: number;
+
+      if (mergeInfo) {
+        // This is a master cell of a merged range
+        cellWidth = this.getMergedWidth(mergeInfo.masterCol, mergeInfo.colSpan);
+        cellHeight = this.getMergedHeight(mergeInfo.masterRow, mergeInfo.rowSpan);
+      } else {
+        // Regular cell
+        cellWidth = WasmBridge.getColWidth(col);
+        cellHeight = WasmBridge.getRowHeight(row);
+      }
+
+      // Apply cell background color if set (for non-merged cells, or re-apply for merged)
       if (cellData.format.backgroundColor) {
         ctx.fillStyle = cellData.format.backgroundColor;
-        ctx.fillRect(pos.x, pos.y, colWidth, rowHeight);
+        ctx.fillRect(pos.x, pos.y, cellWidth, cellHeight);
       }
+
+      // Skip text rendering if no display value
+      if (!cellData.displayValue) continue;
 
       // Set up text rendering
       let fontStyle = '';
@@ -265,9 +330,9 @@ export default class GridRenderer {
       const textWidth = metrics.width;
 
       if (horizontalAlign === 'center') {
-        textX = pos.x + (colWidth - textWidth) / 2;
+        textX = pos.x + (cellWidth - textWidth) / 2;
       } else if (horizontalAlign === 'right') {
-        textX = pos.x + colWidth - textWidth - theme.cellPadding;
+        textX = pos.x + cellWidth - textWidth - theme.cellPadding;
       }
 
       // Vertical alignment
@@ -275,15 +340,15 @@ export default class GridRenderer {
       const verticalAlign = cellData.format.verticalAlign || 'top';
 
       if (verticalAlign === 'middle') {
-        textY = pos.y + (rowHeight - 13) / 2; // 13 is approximate font height
+        textY = pos.y + (cellHeight - 13) / 2; // 13 is approximate font height
       } else if (verticalAlign === 'bottom') {
-        textY = pos.y + rowHeight - 13 - theme.cellPadding;
+        textY = pos.y + cellHeight - 13 - theme.cellPadding;
       }
 
       // Clip text to cell bounds
       ctx.save();
       ctx.beginPath();
-      ctx.rect(pos.x, pos.y, colWidth, rowHeight);
+      ctx.rect(pos.x, pos.y, cellWidth, cellHeight);
       ctx.clip();
 
       // Draw text with underline if needed
@@ -299,6 +364,22 @@ export default class GridRenderer {
       }
 
       ctx.restore();
+    }
+
+    // Draw borders around merged cells
+    ctx.strokeStyle = theme.gridLineColor;
+    ctx.lineWidth = theme.gridLineWidth;
+    for (const merge of mergedRanges) {
+      if (merge.endRow < range.startRow || merge.startRow > range.endRow ||
+          merge.endCol < range.startCol || merge.startCol > range.endCol) {
+        continue;
+      }
+
+      const pos = this.gridToScreen(merge.startRow, merge.startCol);
+      const mergedWidth = this.getMergedWidth(merge.startCol, merge.endCol - merge.startCol + 1);
+      const mergedHeight = this.getMergedHeight(merge.startRow, merge.endRow - merge.startRow + 1);
+
+      ctx.strokeRect(pos.x, pos.y, mergedWidth, mergedHeight);
     }
   }
 
@@ -377,14 +458,34 @@ export default class GridRenderer {
    */
   private renderSelection(): void {
     const ctx = this.ctx;
-    const pos = this.gridToScreen(this.activeCell.row, this.activeCell.col);
-    const colWidth = WasmBridge.getColWidth(this.activeCell.col);
-    const rowHeight = WasmBridge.getRowHeight(this.activeCell.row);
+    const { row, col } = this.activeCell;
+
+    // Check if the active cell is part of a merged range
+    const mergeInfo = WasmBridge.getMergeInfo(row, col);
+
+    let selectionRow = row;
+    let selectionCol = col;
+    let selectionWidth: number;
+    let selectionHeight: number;
+
+    if (mergeInfo) {
+      // Selection covers the entire merged range
+      selectionRow = mergeInfo.masterRow;
+      selectionCol = mergeInfo.masterCol;
+      selectionWidth = this.getMergedWidth(mergeInfo.masterCol, mergeInfo.colSpan);
+      selectionHeight = this.getMergedHeight(mergeInfo.masterRow, mergeInfo.rowSpan);
+    } else {
+      // Regular cell selection
+      selectionWidth = WasmBridge.getColWidth(col);
+      selectionHeight = WasmBridge.getRowHeight(row);
+    }
+
+    const pos = this.gridToScreen(selectionRow, selectionCol);
 
     // Draw selection border
     ctx.strokeStyle = theme.activeCellBorder;
     ctx.lineWidth = theme.activeCellBorderWidth;
-    ctx.strokeRect(pos.x, pos.y, colWidth, rowHeight);
+    ctx.strokeRect(pos.x, pos.y, selectionWidth, selectionHeight);
   }
 
   /**

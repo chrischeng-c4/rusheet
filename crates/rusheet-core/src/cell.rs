@@ -143,6 +143,11 @@ impl CellContent {
             CellContent::Formula { expression, .. } => expression.clone(),
         }
     }
+
+    /// Check if this content is empty (empty value, not a formula)
+    pub fn is_empty(&self) -> bool {
+        matches!(self, CellContent::Value { value: CellValue::Empty, .. })
+    }
 }
 
 /// Complete cell data structure

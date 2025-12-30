@@ -1,4 +1,4 @@
-export { RuSheet, type RuSheetProps, type RuSheetRef } from './RuSheet';
+export { RuSheet, type RuSheetProps, type RuSheetRef, type CSVExportOptions, type CSVImportOptions, type XLSXExportOptions, type XLSXImportOptions } from './RuSheet';
 export { useRuSheet } from './useRuSheet';
 
 // Re-export types from core

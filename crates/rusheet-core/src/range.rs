@@ -171,6 +171,29 @@ impl CellRange {
             current_col: self.start.col,
         }
     }
+
+    /// Check if this range intersects with another range
+    pub fn intersects(&self, other: &CellRange) -> bool {
+        !(self.end.row < other.start.row
+            || self.start.row > other.end.row
+            || self.end.col < other.start.col
+            || self.start.col > other.end.col)
+    }
+
+    /// Check if this range is a single cell
+    pub fn is_single_cell(&self) -> bool {
+        self.start == self.end
+    }
+
+    /// Get the row span (number of rows)
+    pub fn row_span(&self) -> u32 {
+        self.end.row - self.start.row + 1
+    }
+
+    /// Get the column span (number of columns)
+    pub fn col_span(&self) -> u32 {
+        self.end.col - self.start.col + 1
+    }
 }
 
 impl fmt::Display for CellRange {

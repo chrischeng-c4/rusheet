@@ -218,6 +218,163 @@ pub fn power(values: &[CellValue]) -> CellValue {
     }
 }
 
+/// Criteria for conditional functions (COUNTIF, SUMIF, etc.)
+#[derive(Debug, Clone)]
+pub enum Criteria {
+    Equal(CellValue),
+    NotEqual(CellValue),
+    GreaterThan(f64),
+    GreaterThanOrEqual(f64),
+    LessThan(f64),
+    LessThanOrEqual(f64),
+}
+
+impl Criteria {
+    /// Parse a criteria string like ">5", "<=10", "=text", "<>value"
+    pub fn parse(value: &CellValue) -> Option<Criteria> {
+        match value {
+            CellValue::Number(n) => Some(Criteria::Equal(CellValue::Number(*n))),
+            CellValue::Boolean(b) => Some(Criteria::Equal(CellValue::Boolean(*b))),
+            CellValue::Text(s) => {
+                let s = s.trim();
+                if s.is_empty() {
+                    return Some(Criteria::Equal(CellValue::Text(String::new())));
+                }
+
+                // Parse comparison operators
+                if let Some(rest) = s.strip_prefix(">=") {
+                    rest.trim().parse::<f64>().ok().map(Criteria::GreaterThanOrEqual)
+                } else if let Some(rest) = s.strip_prefix("<=") {
+                    rest.trim().parse::<f64>().ok().map(Criteria::LessThanOrEqual)
+                } else if let Some(rest) = s.strip_prefix("<>") {
+                    let rest = rest.trim();
+                    if let Ok(n) = rest.parse::<f64>() {
+                        Some(Criteria::NotEqual(CellValue::Number(n)))
+                    } else {
+                        Some(Criteria::NotEqual(CellValue::Text(rest.to_string())))
+                    }
+                } else if let Some(rest) = s.strip_prefix(">") {
+                    rest.trim().parse::<f64>().ok().map(Criteria::GreaterThan)
+                } else if let Some(rest) = s.strip_prefix("<") {
+                    rest.trim().parse::<f64>().ok().map(Criteria::LessThan)
+                } else if let Some(rest) = s.strip_prefix("=") {
+                    let rest = rest.trim();
+                    if let Ok(n) = rest.parse::<f64>() {
+                        Some(Criteria::Equal(CellValue::Number(n)))
+                    } else {
+                        Some(Criteria::Equal(CellValue::Text(rest.to_string())))
+                    }
+                } else {
+                    // Plain text - exact match (case-insensitive)
+                    if let Ok(n) = s.parse::<f64>() {
+                        Some(Criteria::Equal(CellValue::Number(n)))
+                    } else {
+                        Some(Criteria::Equal(CellValue::Text(s.to_string())))
+                    }
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Check if a value matches this criteria
+    pub fn matches(&self, value: &CellValue) -> bool {
+        match self {
+            Criteria::Equal(target) => match (value, target) {
+                (CellValue::Number(a), CellValue::Number(b)) => (a - b).abs() < 1e-10,
+                (CellValue::Text(a), CellValue::Text(b)) => a.to_lowercase() == b.to_lowercase(),
+                (CellValue::Boolean(a), CellValue::Boolean(b)) => a == b,
+                (CellValue::Empty, CellValue::Text(s)) if s.is_empty() => true,
+                _ => false,
+            },
+            Criteria::NotEqual(target) => match (value, target) {
+                (CellValue::Number(a), CellValue::Number(b)) => (a - b).abs() >= 1e-10,
+                (CellValue::Text(a), CellValue::Text(b)) => a.to_lowercase() != b.to_lowercase(),
+                (CellValue::Boolean(a), CellValue::Boolean(b)) => a != b,
+                _ => true,
+            },
+            Criteria::GreaterThan(n) => value.as_number().map_or(false, |v| v > *n),
+            Criteria::GreaterThanOrEqual(n) => value.as_number().map_or(false, |v| v >= *n),
+            Criteria::LessThan(n) => value.as_number().map_or(false, |v| v < *n),
+            Criteria::LessThanOrEqual(n) => value.as_number().map_or(false, |v| v <= *n),
+        }
+    }
+}
+
+/// COUNTIF - Count cells matching criteria
+/// Args: range_values, criteria
+pub fn countif(range_values: &[CellValue], criteria: &CellValue) -> CellValue {
+    let criteria = match Criteria::parse(criteria) {
+        Some(c) => c,
+        None => return CellValue::Error(CellError::InvalidValue),
+    };
+
+    let count = range_values.iter().filter(|v| criteria.matches(v)).count();
+    CellValue::Number(count as f64)
+}
+
+/// SUMIF - Sum cells where criteria matches
+/// Args: criteria_range_values, criteria, sum_range_values (optional, defaults to criteria_range)
+pub fn sumif(
+    criteria_range: &[CellValue],
+    criteria: &CellValue,
+    sum_range: Option<&[CellValue]>,
+) -> CellValue {
+    let criteria = match Criteria::parse(criteria) {
+        Some(c) => c,
+        None => return CellValue::Error(CellError::InvalidValue),
+    };
+
+    let sum_values = sum_range.unwrap_or(criteria_range);
+
+    let mut total = 0.0;
+    for (i, value) in criteria_range.iter().enumerate() {
+        if criteria.matches(value) {
+            if let Some(sum_val) = sum_values.get(i) {
+                if let Some(n) = sum_val.as_number() {
+                    total += n;
+                }
+            }
+        }
+    }
+
+    CellValue::Number(total)
+}
+
+/// AVERAGEIF - Average cells where criteria matches
+/// Args: criteria_range_values, criteria, average_range_values (optional)
+pub fn averageif(
+    criteria_range: &[CellValue],
+    criteria: &CellValue,
+    average_range: Option<&[CellValue]>,
+) -> CellValue {
+    let criteria = match Criteria::parse(criteria) {
+        Some(c) => c,
+        None => return CellValue::Error(CellError::InvalidValue),
+    };
+
+    let avg_values = average_range.unwrap_or(criteria_range);
+
+    let mut total = 0.0;
+    let mut count = 0;
+    for (i, value) in criteria_range.iter().enumerate() {
+        if criteria.matches(value) {
+            if let Some(avg_val) = avg_values.get(i) {
+                if let Some(n) = avg_val.as_number() {
+                    total += n;
+                    count += 1;
+                }
+            }
+        }
+    }
+
+    if count == 0 {
+        CellValue::Error(CellError::DivisionByZero)
+    } else {
+        CellValue::Number(total / count as f64)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,5 +425,72 @@ mod tests {
     fn test_round() {
         let values = vec![CellValue::Number(3.14159), CellValue::Number(2.0)];
         assert_eq!(round(&values), CellValue::Number(3.14));
+    }
+
+    #[test]
+    fn test_criteria_parse() {
+        // Number criteria
+        let c = Criteria::parse(&CellValue::Number(5.0)).unwrap();
+        assert!(c.matches(&CellValue::Number(5.0)));
+        assert!(!c.matches(&CellValue::Number(4.0)));
+
+        // String comparison operators
+        let c = Criteria::parse(&CellValue::Text(">5".to_string())).unwrap();
+        assert!(c.matches(&CellValue::Number(6.0)));
+        assert!(!c.matches(&CellValue::Number(5.0)));
+
+        let c = Criteria::parse(&CellValue::Text("<=10".to_string())).unwrap();
+        assert!(c.matches(&CellValue::Number(10.0)));
+        assert!(c.matches(&CellValue::Number(5.0)));
+        assert!(!c.matches(&CellValue::Number(11.0)));
+
+        let c = Criteria::parse(&CellValue::Text("<>5".to_string())).unwrap();
+        assert!(c.matches(&CellValue::Number(4.0)));
+        assert!(!c.matches(&CellValue::Number(5.0)));
+    }
+
+    #[test]
+    fn test_countif() {
+        let values = vec![
+            CellValue::Number(1.0),
+            CellValue::Number(5.0),
+            CellValue::Number(10.0),
+            CellValue::Number(5.0),
+        ];
+
+        // Count equals 5
+        assert_eq!(countif(&values, &CellValue::Number(5.0)), CellValue::Number(2.0));
+
+        // Count > 3
+        assert_eq!(countif(&values, &CellValue::Text(">3".to_string())), CellValue::Number(3.0));
+    }
+
+    #[test]
+    fn test_sumif() {
+        let values = vec![
+            CellValue::Number(1.0),
+            CellValue::Number(5.0),
+            CellValue::Number(10.0),
+            CellValue::Number(5.0),
+        ];
+
+        // Sum where > 3
+        assert_eq!(sumif(&values, &CellValue::Text(">3".to_string()), None), CellValue::Number(20.0));
+
+        // Sum where = 5
+        assert_eq!(sumif(&values, &CellValue::Number(5.0), None), CellValue::Number(10.0));
+    }
+
+    #[test]
+    fn test_averageif() {
+        let values = vec![
+            CellValue::Number(2.0),
+            CellValue::Number(4.0),
+            CellValue::Number(6.0),
+            CellValue::Number(8.0),
+        ];
+
+        // Average where > 3
+        assert_eq!(averageif(&values, &CellValue::Text(">3".to_string()), None), CellValue::Number(6.0)); // (4+6+8)/3
     }
 }

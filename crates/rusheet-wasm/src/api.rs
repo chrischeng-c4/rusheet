@@ -1,8 +1,9 @@
-use rusheet_core::{CellContent, CellCoord, CellFormat, CellValue, HorizontalAlign, VerticalAlign, Workbook};
-use rusheet_formula::{evaluate_formula, extract_references, DependencyGraph};
+use rusheet_core::{CellContent, CellCoord, CellError, CellFormat, CellValue, HorizontalAlign, VerticalAlign, Workbook};
+use rusheet_formula::{extract_references, DependencyGraph};
 use rusheet_history::{
-    ClearRangeCommand, HistoryManager, SetCellFormatCommand, SetCellValueCommand,
+    ClearRangeCommand, HistoryManager, MergeCellsCommand, SetCellFormatCommand, SetCellValueCommand,
     SetRangeFormatCommand, InsertRowsCommand, DeleteRowsCommand, InsertColsCommand, DeleteColsCommand,
+    SortRangeCommand, UnmergeCellsCommand,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -62,6 +63,26 @@ pub struct CellFormatData {
 
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+/// Merge range data for JavaScript
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeRangeData {
+    pub start_row: u32,
+    pub start_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
+}
+
+/// Merge info for a cell
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeInfo {
+    pub master_row: u32,
+    pub master_col: u32,
+    pub row_span: u32,
+    pub col_span: u32,
 }
 
 impl From<&CellFormat> for CellFormatData {
@@ -154,55 +175,75 @@ impl SpreadsheetEngine {
     /// Recalculate a single cell's formula
     fn recalculate_cell(&mut self, row: u32, col: u32) {
         let coord = CellCoord::new(row, col);
-        let sheet = self.workbook.active_sheet();
+        let current_sheet_name = self.workbook.active_sheet().name.to_string();
 
-        if let Some(cell) = sheet.get_cell(coord) {
-            if let CellContent::Formula { expression, .. } = &cell.content {
-                let expression = expression.clone();
+        let expression = {
+            let sheet = self.workbook.active_sheet();
+            if let Some(cell) = sheet.get_cell(coord) {
+                if let CellContent::Formula { expression, .. } = &cell.content {
+                    Some(expression.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
 
-                // Log formula evaluation for debugging (only in WASM target)
-                #[cfg(all(debug_assertions, target_arch = "wasm32"))]
-                web_sys::console::log_1(&format!(
-                    "[Formula] Evaluating cell ({}, {}): {}",
-                    row, col, expression
-                ).into());
+        if let Some(expression) = expression {
+            // Log formula evaluation for debugging (only in WASM target)
+            #[cfg(all(debug_assertions, target_arch = "wasm32"))]
+            web_sys::console::log_1(&format!(
+                "[Formula] Evaluating cell ({}, {}): {}",
+                row, col, expression
+            ).into());
 
-                // Create closure to get cell values
-                let sheet = self.workbook.active_sheet();
-                let result = evaluate_formula(&expression, |r, c| {
+            // Create closure to get cell values from any sheet
+            let result = rusheet_formula::evaluate_formula_cross_sheet(
+                &expression,
+                Some(&current_sheet_name),
+                |sheet_name, r, c| {
+                    let sheet = if let Some(name) = sheet_name {
+                        match self.workbook.get_sheet_by_name(name) {
+                            Some(s) => s,
+                            None => return CellValue::Error(CellError::InvalidReference),
+                        }
+                    } else {
+                        self.workbook.active_sheet()
+                    };
                     sheet
                         .get_cell(CellCoord::new(r, c))
                         .map(|c| c.computed_value().clone())
                         .unwrap_or(CellValue::Empty)
-                });
+                },
+            );
 
-                // Log result (only in WASM target)
-                #[cfg(all(debug_assertions, target_arch = "wasm32"))]
-                web_sys::console::log_1(&format!(
-                    "[Formula] Result for ({}, {}): {:?}",
-                    row, col, result
+            // Log result (only in WASM target)
+            #[cfg(all(debug_assertions, target_arch = "wasm32"))]
+            web_sys::console::log_1(&format!(
+                "[Formula] Result for ({}, {}): {:?}",
+                row, col, result
+            ).into());
+
+            // Check for errors and log them (only in WASM target)
+            #[cfg(target_arch = "wasm32")]
+            if matches!(result, CellValue::Error(_)) {
+                web_sys::console::error_1(&format!(
+                    "[Formula Error] Cell ({}, {}) formula '{}' failed: {:?}",
+                    row, col, expression, result
                 ).into());
+            }
 
-                // Check for errors and log them (only in WASM target)
-                #[cfg(target_arch = "wasm32")]
-                if matches!(result, CellValue::Error(_)) {
-                    web_sys::console::error_1(&format!(
-                        "[Formula Error] Cell ({}, {}) formula '{}' failed: {:?}",
-                        row, col, expression, result
-                    ).into());
-                }
-
-                // Update cached value
-                let sheet = self.workbook.active_sheet_mut();
-                if let Some(cell) = sheet.get_cell(coord) {
-                    let new_content = CellContent::Formula {
-                        expression,
-                        cached_value: result,
-                    };
-                    let mut new_cell = cell.clone();
-                    new_cell.content = new_content;
-                    sheet.set_cell(coord, new_cell);
-                }
+            // Update cached value
+            let sheet = self.workbook.active_sheet_mut();
+            if let Some(cell) = sheet.get_cell(coord) {
+                let new_content = CellContent::Formula {
+                    expression,
+                    cached_value: result,
+                };
+                let mut new_cell = cell.clone();
+                new_cell.content = new_content;
+                sheet.set_cell(coord, new_cell);
             }
         }
     }
@@ -540,6 +581,103 @@ impl SpreadsheetEngine {
 
         let coords: Vec<[u32; 2]> = affected.iter().map(|c| [c.row, c.col]).collect();
         serde_json::to_string(&coords).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Sort a range of rows by a specific column
+    /// Returns JSON array of affected cell coordinates
+    #[wasm_bindgen(js_name = sortRange)]
+    pub fn sort_range(
+        &mut self,
+        start_row: u32,
+        end_row: u32,
+        start_col: u32,
+        end_col: u32,
+        sort_col: u32,
+        ascending: bool,
+    ) -> String {
+        let cmd = Box::new(SortRangeCommand::new(
+            start_row, end_row, start_col, end_col, sort_col, ascending,
+        ));
+        let affected = self.history.execute(cmd, self.workbook.active_sheet_mut());
+
+        // Recalculate formulas in the sorted range
+        self.recalculate_all();
+
+        let coords: Vec<[u32; 2]> = affected.iter().map(|c| [c.row, c.col]).collect();
+        serde_json::to_string(&coords).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    // --- Cell Merging ---
+
+    /// Merge cells in a range. Returns JSON array of affected cell coordinates.
+    #[wasm_bindgen(js_name = mergeCells)]
+    pub fn merge_cells(
+        &mut self,
+        start_row: u32,
+        start_col: u32,
+        end_row: u32,
+        end_col: u32,
+    ) -> String {
+        let cmd = Box::new(MergeCellsCommand::from_coords(start_row, start_col, end_row, end_col));
+        let affected = self.history.execute(cmd, self.workbook.active_sheet_mut());
+
+        let coords: Vec<[u32; 2]> = affected.iter().map(|c| [c.row, c.col]).collect();
+        serde_json::to_string(&coords).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Unmerge cells at a position. Returns JSON array of affected cell coordinates.
+    #[wasm_bindgen(js_name = unmergeCells)]
+    pub fn unmerge_cells(&mut self, row: u32, col: u32) -> String {
+        let coord = CellCoord::new(row, col);
+        let cmd = Box::new(UnmergeCellsCommand::from_coord(coord));
+        let affected = self.history.execute(cmd, self.workbook.active_sheet_mut());
+
+        let coords: Vec<[u32; 2]> = affected.iter().map(|c| [c.row, c.col]).collect();
+        serde_json::to_string(&coords).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Get merged ranges as JSON array of objects with start/end coordinates.
+    #[wasm_bindgen(js_name = getMergedRanges)]
+    pub fn get_merged_ranges(&self) -> String {
+        let sheet = self.workbook.active_sheet();
+        let ranges: Vec<MergeRangeData> = sheet
+            .get_merged_ranges()
+            .iter()
+            .map(|r| MergeRangeData {
+                start_row: r.start.row,
+                start_col: r.start.col,
+                end_row: r.end.row,
+                end_col: r.end.col,
+            })
+            .collect();
+
+        serde_json::to_string(&ranges).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Check if a cell is part of a merged range (but not the master cell).
+    #[wasm_bindgen(js_name = isMergedSlave)]
+    pub fn is_merged_slave(&self, row: u32, col: u32) -> bool {
+        let coord = CellCoord::new(row, col);
+        self.workbook.active_sheet().is_merged_slave(coord)
+    }
+
+    /// Get the merge info for a cell (returns null if not merged).
+    #[wasm_bindgen(js_name = getMergeInfo)]
+    pub fn get_merge_info(&self, row: u32, col: u32) -> JsValue {
+        let coord = CellCoord::new(row, col);
+        let sheet = self.workbook.active_sheet();
+
+        if let Some(range) = sheet.get_merge_at(coord) {
+            let info = MergeInfo {
+                master_row: range.start.row,
+                master_col: range.start.col,
+                row_span: range.row_span(),
+                col_span: range.col_span(),
+            };
+            serde_wasm_bindgen::to_value(&info).unwrap_or(JsValue::NULL)
+        } else {
+            JsValue::NULL
+        }
     }
 
     // --- Serialization ---

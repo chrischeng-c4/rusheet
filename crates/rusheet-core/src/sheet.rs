@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::cell::{Cell, CellContent, CellValue};
 use crate::chunk::ChunkedGrid;
-use crate::range::CellCoord;
+use crate::range::{CellCoord, CellRange};
 use crate::spatial::SpatialIndex;
 
 /// Default row height in pixels
@@ -37,6 +37,9 @@ pub struct Sheet {
     /// Number of frozen columns (scroll lock)
     #[serde(default)]
     pub frozen_cols: u32,
+    /// Merged cell ranges - each range represents a merged area with top-left as master cell
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub merged_ranges: Vec<CellRange>,
     /// Spatial index for O(log N) position lookups (rebuilt on deserialize)
     #[serde(skip, default = "SpatialIndex::new")]
     spatial: SpatialIndex,
@@ -48,6 +51,39 @@ fn default_row_height() -> f64 {
 
 fn default_col_width() -> f64 {
     DEFAULT_COL_WIDTH
+}
+
+/// Compare two CellValues for sorting purposes.
+/// Ordering: Empty < Number < Text < Boolean < Error
+fn compare_cell_values(a: &Option<CellValue>, b: &Option<CellValue>) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+
+    match (a, b) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
+        (Some(a_val), Some(b_val)) => match (a_val, b_val) {
+            (CellValue::Empty, CellValue::Empty) => Ordering::Equal,
+            (CellValue::Empty, _) => Ordering::Less,
+            (_, CellValue::Empty) => Ordering::Greater,
+
+            (CellValue::Number(a_num), CellValue::Number(b_num)) => {
+                a_num.partial_cmp(b_num).unwrap_or(Ordering::Equal)
+            }
+            (CellValue::Number(_), _) => Ordering::Less,
+            (_, CellValue::Number(_)) => Ordering::Greater,
+
+            (CellValue::Text(a_txt), CellValue::Text(b_txt)) => a_txt.cmp(b_txt),
+            (CellValue::Text(_), _) => Ordering::Less,
+            (_, CellValue::Text(_)) => Ordering::Greater,
+
+            (CellValue::Boolean(a_bool), CellValue::Boolean(b_bool)) => a_bool.cmp(b_bool),
+            (CellValue::Boolean(_), _) => Ordering::Less,
+            (_, CellValue::Boolean(_)) => Ordering::Greater,
+
+            (CellValue::Error(_), CellValue::Error(_)) => Ordering::Equal,
+        },
+    }
 }
 
 /// Custom serialization for ChunkedGrid to maintain backward compatibility
@@ -126,6 +162,7 @@ impl Sheet {
             default_col_width: DEFAULT_COL_WIDTH,
             frozen_rows: 0,
             frozen_cols: 0,
+            merged_ranges: Vec::new(),
             spatial: SpatialIndex::new(),
         }
     }
@@ -467,6 +504,152 @@ impl Sheet {
             .collect()
     }
 
+    /// Sort rows in a range by a specific column.
+    /// Returns the original row order (for undo purposes).
+    ///
+    /// # Arguments
+    /// * `start_row` - First row of the range to sort
+    /// * `end_row` - Last row of the range to sort (inclusive)
+    /// * `start_col` - First column of the range
+    /// * `end_col` - Last column of the range (inclusive)
+    /// * `sort_col` - Column to sort by
+    /// * `ascending` - True for ascending, false for descending
+    ///
+    /// # Returns
+    /// Vec of (original_row_index, sorted_row_index) pairs for undo
+    pub fn sort_range(
+        &mut self,
+        start_row: u32,
+        end_row: u32,
+        start_col: u32,
+        end_col: u32,
+        sort_col: u32,
+        ascending: bool,
+    ) -> Vec<(u32, u32)> {
+        if start_row >= end_row || sort_col < start_col || sort_col > end_col {
+            return Vec::new();
+        }
+
+        let num_rows = (end_row - start_row + 1) as usize;
+
+        // Collect row data: (original_row_index, sort_value, all cells in row)
+        let mut row_data: Vec<(u32, Option<CellValue>, Vec<(u32, Cell)>)> = Vec::with_capacity(num_rows);
+
+        for row in start_row..=end_row {
+            // Get sort value for this row
+            let sort_value = self
+                .get_cell(CellCoord::new(row, sort_col))
+                .map(|c| c.computed_value().clone());
+
+            // Collect all cells in this row within the column range
+            let mut row_cells: Vec<(u32, Cell)> = Vec::new();
+            for col in start_col..=end_col {
+                if let Some(cell) = self.get_cell(CellCoord::new(row, col)) {
+                    row_cells.push((col, cell.clone()));
+                }
+            }
+
+            row_data.push((row, sort_value, row_cells));
+        }
+
+        // Sort by the sort_value
+        row_data.sort_by(|a, b| {
+            let cmp = compare_cell_values(&a.1, &b.1);
+            if ascending { cmp } else { cmp.reverse() }
+        });
+
+        // Build mapping: new_position -> original_row
+        let row_mapping: Vec<(u32, u32)> = row_data
+            .iter()
+            .enumerate()
+            .map(|(new_idx, (orig_row, _, _))| (*orig_row, start_row + new_idx as u32))
+            .collect();
+
+        // Clear all cells in the range
+        for row in start_row..=end_row {
+            for col in start_col..=end_col {
+                self.cells.remove(row as usize, col as usize);
+            }
+        }
+
+        // Reinsert cells in sorted order
+        for (new_idx, (_, _, cells)) in row_data.into_iter().enumerate() {
+            let new_row = start_row + new_idx as u32;
+            for (col, cell) in cells {
+                if !cell.is_empty() {
+                    self.cells.insert(new_row as usize, col as usize, cell);
+                }
+            }
+        }
+
+        // Also sort row heights if any are custom
+        let mut height_changes: Vec<(u32, f64)> = Vec::new();
+        for &(orig_row, new_row) in &row_mapping {
+            if let Some(&height) = self.row_heights.get(&orig_row) {
+                height_changes.push((new_row, height));
+            }
+        }
+
+        // Clear old row heights in range
+        for row in start_row..=end_row {
+            self.row_heights.remove(&row);
+        }
+
+        // Apply new row heights
+        for (row, height) in height_changes {
+            self.row_heights.insert(row, height);
+            self.spatial.set_row_height(row as usize, height);
+        }
+
+        row_mapping
+    }
+
+    /// Restore row order from a previous sort operation (for undo).
+    /// Takes the mapping returned by sort_range and reverses it.
+    pub fn unsort_range(
+        &mut self,
+        start_row: u32,
+        end_row: u32,
+        start_col: u32,
+        end_col: u32,
+        original_mapping: &[(u32, u32)],
+    ) {
+        // Create reverse mapping: current_row -> original_row
+        let mut reverse_mapping: Vec<(u32, u32)> = original_mapping
+            .iter()
+            .map(|&(orig, curr)| (curr, orig))
+            .collect();
+        reverse_mapping.sort_by_key(|&(curr, _)| curr);
+
+        // Collect current row data
+        let mut row_data: Vec<(u32, Vec<(u32, Cell)>)> = Vec::new();
+        for (curr_row, orig_row) in &reverse_mapping {
+            let mut row_cells: Vec<(u32, Cell)> = Vec::new();
+            for col in start_col..=end_col {
+                if let Some(cell) = self.get_cell(CellCoord::new(*curr_row, col)) {
+                    row_cells.push((col, cell.clone()));
+                }
+            }
+            row_data.push((*orig_row, row_cells));
+        }
+
+        // Clear all cells in the range
+        for row in start_row..=end_row {
+            for col in start_col..=end_col {
+                self.cells.remove(row as usize, col as usize);
+            }
+        }
+
+        // Reinsert cells at original positions
+        for (orig_row, cells) in row_data {
+            for (col, cell) in cells {
+                if !cell.is_empty() {
+                    self.cells.insert(orig_row as usize, col as usize, cell);
+                }
+            }
+        }
+    }
+
     /// Delete columns at the given position, shifting remaining columns left.
     /// Returns the deleted cells.
     ///
@@ -509,6 +692,93 @@ impl Sheet {
             .map(|((row, col), cell)| (CellCoord::new(row as u32, col as u32), cell))
             .collect()
     }
+
+    // =========================================================================
+    // Cell Merging
+    // =========================================================================
+
+    /// Merge cells in the given range.
+    /// The top-left cell becomes the "master" cell that holds the value.
+    /// Returns true if merge was successful, false if range overlaps existing merge.
+    pub fn merge_cells(&mut self, range: CellRange) -> bool {
+        // Don't merge single cells
+        if range.is_single_cell() {
+            return false;
+        }
+
+        // Check for overlap with existing merges
+        for existing in &self.merged_ranges {
+            if existing.intersects(&range) {
+                return false;
+            }
+        }
+
+        // Move all non-empty cell values to the master cell (top-left)
+        let master = range.start;
+        let mut master_value: Option<CellContent> = None;
+
+        // Find first non-empty cell in the range to use as master value
+        for coord in range.iter() {
+            if let Some(cell) = self.get_cell(coord) {
+                if !cell.content.is_empty() {
+                    if master_value.is_none() {
+                        master_value = Some(cell.content.clone());
+                    }
+                    // Clear non-master cells
+                    if coord != master {
+                        self.remove_cell(coord);
+                    }
+                }
+            }
+        }
+
+        // Set master cell value if we found one
+        if let Some(content) = master_value {
+            let cell = self.get_cell_mut(master);
+            cell.content = content;
+        }
+
+        self.merged_ranges.push(range);
+        true
+    }
+
+    /// Unmerge cells in the given range.
+    /// Returns true if a merge was found and removed.
+    pub fn unmerge_cells(&mut self, range: CellRange) -> bool {
+        // Find and remove merge that matches or contains this range
+        if let Some(idx) = self.merged_ranges.iter().position(|r| r == &range || r.contains(range.start)) {
+            self.merged_ranges.remove(idx);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get the merge range containing the given coordinate, if any.
+    pub fn get_merge_at(&self, coord: CellCoord) -> Option<&CellRange> {
+        self.merged_ranges.iter().find(|r| r.contains(coord))
+    }
+
+    /// Check if a coordinate is inside a merged range but not the master cell.
+    pub fn is_merged_slave(&self, coord: CellCoord) -> bool {
+        self.merged_ranges.iter().any(|r| r.contains(coord) && r.start != coord)
+    }
+
+    /// Get the master cell coordinate for a merged cell.
+    /// Returns Some(master) if the coord is in a merged range, None otherwise.
+    pub fn get_master_cell(&self, coord: CellCoord) -> Option<CellCoord> {
+        self.get_merge_at(coord).map(|r| r.start)
+    }
+
+    /// Get all merged ranges.
+    pub fn get_merged_ranges(&self) -> &[CellRange] {
+        &self.merged_ranges
+    }
+
+    /// Check if a range would overlap with any existing merged ranges.
+    pub fn would_overlap_merge(&self, range: &CellRange) -> bool {
+        self.merged_ranges.iter().any(|r| r.intersects(range))
+    }
 }
 
 // Custom Deserialize implementation to rebuild spatial index after deserialization
@@ -535,6 +805,8 @@ impl<'de> Deserialize<'de> for Sheet {
             frozen_rows: u32,
             #[serde(default)]
             frozen_cols: u32,
+            #[serde(default)]
+            merged_ranges: Vec<CellRange>,
         }
 
         let helper = SheetHelper::deserialize(deserializer)?;
@@ -548,6 +820,7 @@ impl<'de> Deserialize<'de> for Sheet {
             default_col_width: helper.default_col_width,
             frozen_rows: helper.frozen_rows,
             frozen_cols: helper.frozen_cols,
+            merged_ranges: helper.merged_ranges,
             spatial: SpatialIndex::new(),
         };
 

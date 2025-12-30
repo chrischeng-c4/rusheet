@@ -46,6 +46,42 @@ export interface RuSheetProps {
   readOnly?: boolean;
 }
 
+/** CSV export options */
+export interface CSVExportOptions {
+  delimiter?: string;
+  startRow?: number;
+  endRow?: number;
+  startCol?: number;
+  endCol?: number;
+  includeEmptyRows?: boolean;
+}
+
+/** CSV import options */
+export interface CSVImportOptions {
+  delimiter?: string;
+  startRow?: number;
+  startCol?: number;
+  clearExisting?: boolean;
+}
+
+/** XLSX export options */
+export interface XLSXExportOptions {
+  sheetName?: string;
+  startRow?: number;
+  endRow?: number;
+  startCol?: number;
+  endCol?: number;
+}
+
+/** XLSX import options */
+export interface XLSXImportOptions {
+  sheetIndex?: number;
+  sheetName?: string;
+  startRow?: number;
+  startCol?: number;
+  clearExisting?: boolean;
+}
+
 export interface RuSheetRef {
   /** Get cell data */
   getCellData: (row: number, col: number) => CellData | null;
@@ -97,6 +133,48 @@ export interface RuSheetRef {
   setData: (data: (string | number | null)[][]) => void;
   /** Force re-render */
   render: () => void;
+  /** Export data as CSV string */
+  exportCSV: (options?: CSVExportOptions) => string;
+  /** Import data from CSV string */
+  importCSV: (csvString: string, options?: CSVImportOptions) => { rows: number; cols: number };
+  /** Download data as CSV file */
+  downloadCSV: (filename?: string, options?: CSVExportOptions) => void;
+  /** Import CSV from File object */
+  importCSVFile: (file: File, options?: CSVImportOptions) => Promise<{ rows: number; cols: number }>;
+  /** Export data as XLSX ArrayBuffer */
+  exportXLSX: (options?: XLSXExportOptions) => ArrayBuffer;
+  /** Import data from XLSX ArrayBuffer */
+  importXLSX: (buffer: ArrayBuffer, options?: XLSXImportOptions) => { rows: number; cols: number; sheetName: string };
+  /** Download data as XLSX file */
+  downloadXLSX: (filename?: string, options?: XLSXExportOptions) => void;
+  /** Import XLSX from File object */
+  importXLSXFile: (file: File, options?: XLSXImportOptions) => Promise<{ rows: number; cols: number; sheetName: string }>;
+  /** Get sheet names from XLSX file */
+  getXLSXSheetNames: (buffer: ArrayBuffer) => string[];
+  /** Sort a range by column */
+  sortRange: (
+    startRow: number,
+    endRow: number,
+    startCol: number,
+    endCol: number,
+    sortCol: number,
+    ascending: boolean
+  ) => [number, number][];
+  /** Merge cells in a range */
+  mergeCells: (
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number
+  ) => [number, number][];
+  /** Unmerge cells at a position */
+  unmergeCells: (row: number, col: number) => [number, number][];
+  /** Get all merged ranges */
+  getMergedRanges: () => { startRow: number; startCol: number; endRow: number; endCol: number }[];
+  /** Check if a cell is a merged slave (part of merge but not master) */
+  isMergedSlave: (row: number, col: number) => boolean;
+  /** Get merge info for a cell */
+  getMergeInfo: (row: number, col: number) => { masterRow: number; masterCol: number; rowSpan: number; colSpan: number } | null;
 }
 
 /**
@@ -354,6 +432,51 @@ export const RuSheet = forwardRef<RuSheetRef, RuSheetProps>(function RuSheet(
       rendererRef.current?.render();
     },
     render: () => rendererRef.current?.render(),
+    // CSV Import/Export
+    exportCSV: (options) => rusheet.exportCSV(options),
+    importCSV: (csvString, options) => {
+      const result = rusheet.importCSV(csvString, options);
+      rendererRef.current?.render();
+      return result;
+    },
+    downloadCSV: (filename, options) => rusheet.downloadCSV(filename, options),
+    importCSVFile: async (file, options) => {
+      const result = await rusheet.importCSVFile(file, options);
+      rendererRef.current?.render();
+      return result;
+    },
+    // XLSX Import/Export
+    exportXLSX: (options) => rusheet.exportXLSX(options),
+    importXLSX: (buffer, options) => {
+      const result = rusheet.importXLSX(buffer, options);
+      rendererRef.current?.render();
+      return result;
+    },
+    downloadXLSX: (filename, options) => rusheet.downloadXLSX(filename, options),
+    importXLSXFile: async (file, options) => {
+      const result = await rusheet.importXLSXFile(file, options);
+      rendererRef.current?.render();
+      return result;
+    },
+    getXLSXSheetNames: (buffer) => rusheet.getXLSXSheetNames(buffer),
+    sortRange: (startRow, endRow, startCol, endCol, sortCol, ascending) => {
+      const result = rusheet.sortRange(startRow, endRow, startCol, endCol, sortCol, ascending, 'api');
+      rendererRef.current?.render();
+      return result;
+    },
+    mergeCells: (startRow, startCol, endRow, endCol) => {
+      const result = rusheet.mergeCells(startRow, startCol, endRow, endCol, 'api');
+      rendererRef.current?.render();
+      return result;
+    },
+    unmergeCells: (row, col) => {
+      const result = rusheet.unmergeCells(row, col, 'api');
+      rendererRef.current?.render();
+      return result;
+    },
+    getMergedRanges: () => rusheet.getMergedRanges(),
+    isMergedSlave: (row, col) => rusheet.isMergedSlave(row, col),
+    getMergeInfo: (row, col) => rusheet.getMergeInfo(row, col),
   }), []);
 
   const containerStyle: React.CSSProperties = {

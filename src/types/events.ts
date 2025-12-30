@@ -105,6 +105,36 @@ export interface ColsDeleteEvent {
   source: EventSource;
 }
 
+// Sort range event
+export interface SortRangeEvent {
+  startRow: number;
+  endRow: number;
+  startCol: number;
+  endCol: number;
+  sortCol: number;
+  ascending: boolean;
+  affectedCells: [number, number][];
+  source: EventSource;
+}
+
+// Merge cells event
+export interface MergeCellsEvent {
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+  affectedCells: [number, number][];
+  source: EventSource;
+}
+
+// Unmerge cells event
+export interface UnmergeCellsEvent {
+  row: number;
+  col: number;
+  affectedCells: [number, number][];
+  source: EventSource;
+}
+
 // Data loaded event
 export interface DataLoadedEvent {
   rows: number;

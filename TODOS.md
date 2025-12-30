@@ -6,6 +6,58 @@ This document outlines all pending work, known issues, and future features for R
 
 **Legend**: `[ ]` pending | `[x]` done | `[!]` blocked | `[~]` in progress
 
+**Target Users:** 開發者（嵌入式）+ 企業用戶
+
+---
+
+## Google Sheets 差距分析
+
+### 公式功能 (24 個 vs Google 400+)
+| 缺少功能 | 優先級 |
+|----------|--------|
+| 跨工作表引用 `Sheet2!A1` | P1 | ✅ 已完成 |
+| 陣列公式 `ARRAYFORMULA` | P2 |
+| 命名範圍 | P2 |
+| COUNTIF, SUMIF, AVERAGEIF | P1 | ✅ 已完成 |
+| DATE, TODAY, NOW, DATEDIF | P1 |
+| INDEX, MATCH, OFFSET | P2 |
+| FIND, SEARCH, SUBSTITUTE | P2 |
+
+### 資料功能
+| 缺少功能 | 優先級 | 狀態 |
+|----------|--------|------|
+| 排序（單欄/多欄）| P1 | ✅ 已完成 |
+| 合併儲存格 | P1 | ✅ 已完成 |
+| 篩選/自動篩選 | P1 | ❌ |
+| 條件格式 | P2 | ❌ |
+| 資料驗證（下拉選單）| P2 | ❌ |
+| 樞紐分析表 | P3 | ❌ |
+| 圖表 | P3 | ❌ |
+
+### 編輯功能
+| 缺少功能 | 優先級 |
+|----------|--------|
+| 合併儲存格 | P1 |
+| 尋找和取代 | P2 |
+| 特殊貼上（僅值、轉置）| P2 |
+| 自動填入 | P2 |
+
+### 匯入/匯出
+| 缺少功能 | 優先級 | 狀態 |
+|----------|--------|------|
+| CSV 匯入/匯出 | P0 | ✅ 已完成 |
+| Excel 匯入 (.xlsx) | P1 | ✅ 已完成 |
+| Excel 匯出 (.xlsx) | P2 | ✅ 已完成 |
+| PDF 匯出 | P3 | ❌ |
+
+### 協作功能
+| 缺少功能 | 優先級 |
+|----------|--------|
+| 游標追蹤（顯示其他人位置）| P1 |
+| 評論系統 | P2 |
+| 版本歷史 | P2 |
+| 權限控制（查看/編輯）| P2 |
+
 ---
 
 ## Open-Source Readiness Checklist
@@ -89,102 +141,149 @@ This document outlines all pending work, known issues, and future features for R
 
 ## Current Priority Queue
 
-### P0: Critical (Blocks Integration)
+### P0: Critical (Blocks Production Use)
 
-- [x] **Implement Event/Callback System** ✅ (2025-12-30)
-  - Added: `onFormatChange`, `onSheetAdd/Delete/Rename`, `onActiveSheetChange`, `onUndo/Redo`
-  - Integrated `rusheet` API into main.ts and CellEditor
-  - Library export via `src/index.ts`
-  - 11 unit tests added
-
-- [x] **Implement Row/Column Insert/Delete** ✅ (2025-12-30)
-  - `insertRows(atRow, count)`, `deleteRows(atRow, count)`
-  - `insertCols(atCol, count)`, `deleteCols(atCol, count)`
-  - Formula references auto-update (respects $absolute refs)
-  - Full undo/redo support with history commands
-  - TypeScript events: `onRowsInsert`, `onRowsDelete`, `onColsInsert`, `onColsDelete`
-
+- [x] **Event/Callback System** ✅ (2025-12-30)
+- [x] **Row/Column Insert/Delete** ✅ (2025-12-30)
 - [x] **Real-time Collaboration Server** ✅ (2025-12-30)
-  - Rust backend with Axum (rusheet-server crate)
-  - REST API for workbook CRUD
-  - WebSocket endpoint with yrs (Rust Yjs)
-  - PostgreSQL persistence
-  - Frontend Yjs integration
-  - User presence and cursor awareness
 
-- [ ] **Structured Error Handling** - API returns strings, not error objects
+- [x] **CSV Import/Export** ✅ (2025-12-30)
+  - `exportCSV()`, `importCSV()`, `downloadCSV()`, `importCSVFile()`
+  - TypeScript 層用 papaparse 實現
+  - 支援自訂分隔符、範圍匯出、位移匯入
+
+- [ ] **Structured Error Handling**
   - Create `RuSheetError { code, message, affectedCells }`
   - Consistent error codes across WASM boundary
 
-### P1: High Priority (Production Readiness)
+### P1: High Priority (核心功能補齊)
 
-- [ ] **CSV Import/Export** - Standard data exchange format
-  - Can implement in TypeScript layer using papaparse
-  - Need WASM API to bulk-set cells efficiently
+#### 公式功能
+- [x] **Cross-Sheet References** ✅ (2025-12-30)
+  - `Sheet2!A1`, `'Sheet Name'!A1:B5` 語法解析
+  - `CrossSheetEvaluator` 支援跨工作表取值
+  - `evaluate_formula_cross_sheet()` API
+  - 84 Rust formula tests + 121 TypeScript tests passing
 
-- [ ] **Fix WASM Loading in Node.js Tests** - 88 integration tests blocked
-  - Error: `WebAssembly.instantiate(): Argument 0 must be a buffer source`
-  - Options: Browser-only tests, WASM mock, or fix ArrayBuffer conversion
-  - See "Testing Issues" section below for details
+- [x] **Conditional Functions** ✅ (2025-12-30)
+  - COUNTIF, SUMIF, AVERAGEIF
+  - Criteria 解析：`>`, `<`, `>=`, `<=`, `<>`, `=` 及純值匹配
+  - 支援可選的 sum_range/average_range 參數
+  - 77 Rust tests passing
 
-- [ ] **Cross-Sheet References** - `Sheet2!A1` syntax parsed but not evaluated
-  - Parser supports `SheetRef`, evaluator returns `InvalidReference`
-  - Implement in `rusheet-formula/src/evaluator.rs`
+- [ ] **Date/Time Functions**
+  - DATE, TIME, NOW, TODAY, DATEDIF
+  - Date formatting in cells
 
-- [ ] **XLSX Import/Export** - Excel compatibility
-  - Use `calamine` (read) + `rust_xlsxwriter` (write)
-  - Consider WASM bundle size tradeoff
-  - Critical for enterprise adoption
+#### 資料功能
+- [x] **Sorting** ✅ (2025-12-30)
+  - 單欄排序（升序/降序）
+  - `sortRange()` API in Rust core, WASM, and TypeScript
+  - Undo/redo 支援
+  - 7 unit tests passing
+
+- [x] **Cell Merging** ✅ (2025-12-30)
+  - `mergeCells()`, `unmergeCells()` API in Rust core, WASM, TypeScript
+  - `getMergedRanges()`, `getMergeInfo()`, `isMergedSlave()` query APIs
+  - Undo/redo 支援 (MergeCellsCommand, UnmergeCellsCommand)
+  - Canvas 渲染：合併區域背景、跳過 slave cells、選取區覆蓋整個合併範圍
+  - 17 unit tests passing
+
+- [ ] **Filtering / AutoFilter**
+  - 自動篩選下拉選單
+  - 多條件篩選
+
+#### 匯入匯出
+- [x] **XLSX Import/Export** ✅ (2025-12-30)
+  - `exportXLSX()`, `importXLSX()`, `downloadXLSX()`, `importXLSXFile()`
+  - TypeScript 層用 SheetJS (xlsx) 實現
+  - 支援多工作表選擇、範圍匯出
+
+#### 協作功能
+- [ ] **Cursor Tracking** 🔥
+  - 顯示其他協作者的游標位置
+  - 用戶顏色標識
 
 ### P2: Medium Priority (Feature Completeness)
 
+#### 公式
 - [ ] **Advanced Lookup Functions**
-  - VLOOKUP, HLOOKUP, INDEX, MATCH
-  - SUMIF, COUNTIF, AVERAGEIF
+  - INDEX, MATCH, OFFSET, INDIRECT
 
-- [ ] **Date/Time Functions**
-  - DATE, TIME, NOW, TODAY
-  - DATEVALUE, TIMEVALUE
-  - Date formatting in cells
-
-- [ ] **Conditional Formatting**
-  - Rule-based cell styling
-  - Data bars, color scales, icon sets
-
-- [ ] **Data Validation**
-  - Input validation rules per cell
-  - Dropdown lists, number ranges, custom formulas
-
-- [ ] **Cell Merging**
-  - Merge/unmerge cell ranges
-  - Merged cell rendering
+- [ ] **Array Formulas**
+  - ARRAYFORMULA 支援
+  - 動態陣列溢出
 
 - [ ] **Named Ranges**
-  - Create/edit named ranges
-  - Use in formulas
+  - 創建/編輯命名範圍
+  - 在公式中使用
 
+- [ ] **Text Functions**
+  - FIND, SEARCH, SUBSTITUTE, TEXT
+
+#### 資料
+- [ ] **Conditional Formatting**
+  - 規則型儲存格樣式
+  - 資料條、色階、圖示集
+
+- [ ] **Data Validation**
+  - 下拉選單、數字範圍
+  - 自訂公式驗證
+
+#### 編輯
 - [ ] **Find & Replace**
-  - Search across sheets
-  - Regex support
+  - 跨工作表搜尋
+  - 正則表達式支援
+
+- [ ] **Special Paste**
+  - 僅貼上值、僅格式
+  - 轉置貼上
+
+- [ ] **AutoFill**
+  - 拖曳填充
+  - 序列識別（日期、數字）
+
+#### 協作
+- [ ] **Comments System**
+  - 儲存格評論、回覆
+  - 評論指示器
+
+- [ ] **Version History**
+  - 查看歷史版本
+  - 回滾功能
+
+- [ ] **Permission Control**
+  - 查看/編輯權限
+  - 工作表保護
+
+#### 匯出
+- [x] **XLSX Export** ✅ (2025-12-30)
+  - TypeScript 層用 SheetJS (xlsx) 實現（非 Rust）
+  - 基本格式匯出
 
 ### P3: Low Priority (Nice to Have)
 
-- [ ] **Cell Comments/Notes**
-  - Add/edit/delete comments
-  - Comment indicators in cells
+- [ ] **Pivot Tables**
+  - 基本樞紐分析功能
+  - 分組、彙總
 
-- [ ] **Charts** (spec exists, not implemented)
-  - Basic chart types (bar, line, pie)
-  - Chart data range binding
-  - Consider Chart.js or D3 integration
+- [ ] **Charts**
+  - 基本圖表類型（柱狀、折線、圓餅）
+  - Chart.js 或 D3 整合
 
 - [ ] **Print/PDF Export**
-  - Print preview
-  - PDF generation
+  - 列印預覽
+  - PDF 生成
 
-- [ ] **Keyboard Shortcuts Documentation**
-  - Comprehensive shortcut list
-  - Customizable shortcuts
+- [ ] **Plugin System**
+  - 擴充機制
+  - 自訂函數
+
+### Testing (Blocked)
+
+- [ ] **Fix WASM Loading in Node.js Tests** - 88 tests blocked
+  - Error: `WebAssembly.instantiate(): Argument 0 must be a buffer source`
+  - See "Testing Issues" section below
 
 ---
 
@@ -410,6 +509,19 @@ const arrayBuffer = uint8Array.buffer;
 - `onFormatChange`, `onSheetAdd/Delete/Rename`, `onActiveSheetChange`
 - `onUndo`, `onRedo`
 - `onRowsInsert`, `onRowsDelete`, `onColsInsert`, `onColsDelete`
+- `onSortRange`
+
+**Import/Export:** ✅ (2025-12-30)
+- CSV: `exportCSV()`, `importCSV()`, `downloadCSV()`, `importCSVFile()`
+- XLSX: `exportXLSX()`, `importXLSX()`, `downloadXLSX()`, `importXLSXFile()`, `getXLSXSheetNames()`
+
+**Sorting:** ✅ (2025-12-30)
+- `sortRange(startRow, endRow, startCol, endCol, sortCol, ascending)`
+
+**Cell Merging:** ✅ (2025-12-30)
+- `mergeCells(startRow, startCol, endRow, endCol)`
+- `unmergeCells(row, col)`
+- `getMergedRanges()`, `getMergeInfo(row, col)`, `isMergedSlave(row, col)`
 
 **Collaboration Server API:** ✅
 - `GET/POST /api/workbooks` - List/create workbooks

@@ -158,12 +158,71 @@ export function deleteCols(atCol: number, count: number): [number, number][] {
   return JSON.parse(json);
 }
 
+// Sorting
+export function sortRange(
+  startRow: number,
+  endRow: number,
+  startCol: number,
+  endCol: number,
+  sortCol: number,
+  ascending: boolean
+): [number, number][] {
+  const json = getEngine().sortRange(startRow, endRow, startCol, endCol, sortCol, ascending);
+  return JSON.parse(json);
+}
+
 export function serialize(): string {
   return getEngine().serialize();
 }
 
 export function deserialize(json: string): boolean {
   return getEngine().deserialize(json);
+}
+
+// =============================================================================
+// Cell Merging
+// =============================================================================
+
+export interface MergeInfo {
+  masterRow: number;
+  masterCol: number;
+  rowSpan: number;
+  colSpan: number;
+}
+
+export interface MergeRange {
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+}
+
+export function mergeCells(
+  startRow: number,
+  startCol: number,
+  endRow: number,
+  endCol: number
+): [number, number][] {
+  const json = getEngine().mergeCells(startRow, startCol, endRow, endCol);
+  return JSON.parse(json);
+}
+
+export function unmergeCells(row: number, col: number): [number, number][] {
+  const json = getEngine().unmergeCells(row, col);
+  return JSON.parse(json);
+}
+
+export function getMergedRanges(): MergeRange[] {
+  const json = getEngine().getMergedRanges();
+  return JSON.parse(json);
+}
+
+export function isMergedSlave(row: number, col: number): boolean {
+  return getEngine().isMergedSlave(row, col);
+}
+
+export function getMergeInfo(row: number, col: number): MergeInfo | null {
+  return getEngine().getMergeInfo(row, col) as MergeInfo | null;
 }
 
 export function recalculateAll(): void {
