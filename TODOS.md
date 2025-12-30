@@ -19,7 +19,7 @@ This document outlines all pending work, known issues, and future features for R
 | 陣列公式 `ARRAYFORMULA` | P2 |
 | 命名範圍 | P2 |
 | COUNTIF, SUMIF, AVERAGEIF | P1 | ✅ 已完成 |
-| DATE, TODAY, NOW, DATEDIF | P1 |
+| DATE, TODAY, NOW, DATEDIF | P1 | ✅ 已完成 |
 | INDEX, MATCH, OFFSET | P2 |
 | FIND, SEARCH, SUBSTITUTE | P2 |
 
@@ -171,9 +171,11 @@ This document outlines all pending work, known issues, and future features for R
   - 支援可選的 sum_range/average_range 參數
   - 77 Rust tests passing
 
-- [ ] **Date/Time Functions**
+- [x] **Date/Time Functions** ✅ (2025-12-30)
   - DATE, TIME, NOW, TODAY, DATEDIF
-  - Date formatting in cells
+  - YEAR, MONTH, DAY, HOUR, MINUTE, SECOND
+  - Excel-compatible serial date format (day 1 = Jan 1, 1900)
+  - 14 Rust tests passing
 
 #### 資料功能
 - [x] **Sorting** ✅ (2025-12-30)

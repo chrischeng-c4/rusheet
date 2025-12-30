@@ -239,6 +239,19 @@ where
             "RIGHT" => functions::text::right(&values),
             "MID" => functions::text::mid(&values),
 
+            // Date/Time functions
+            "TODAY" => functions::datetime::today(&values),
+            "NOW" => functions::datetime::now(&values),
+            "DATE" => functions::datetime::date(&values),
+            "TIME" => functions::datetime::time(&values),
+            "YEAR" => functions::datetime::year(&values),
+            "MONTH" => functions::datetime::month(&values),
+            "DAY" => functions::datetime::day(&values),
+            "HOUR" => functions::datetime::hour(&values),
+            "MINUTE" => functions::datetime::minute(&values),
+            "SECOND" => functions::datetime::second(&values),
+            "DATEDIF" => functions::datetime::datedif(&values),
+
             _ => CellValue::Error(CellError::InvalidName),
         }
     }
@@ -534,6 +547,19 @@ where
             "LEFT" => functions::text::left(&values),
             "RIGHT" => functions::text::right(&values),
             "MID" => functions::text::mid(&values),
+
+            // Date/Time functions
+            "TODAY" => functions::datetime::today(&values),
+            "NOW" => functions::datetime::now(&values),
+            "DATE" => functions::datetime::date(&values),
+            "TIME" => functions::datetime::time(&values),
+            "YEAR" => functions::datetime::year(&values),
+            "MONTH" => functions::datetime::month(&values),
+            "DAY" => functions::datetime::day(&values),
+            "HOUR" => functions::datetime::hour(&values),
+            "MINUTE" => functions::datetime::minute(&values),
+            "SECOND" => functions::datetime::second(&values),
+            "DATEDIF" => functions::datetime::datedif(&values),
 
             _ => CellValue::Error(CellError::InvalidName),
         }
