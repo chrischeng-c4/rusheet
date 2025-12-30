@@ -33,25 +33,14 @@ function colToLetter(col: number): string {
  */
 async function main(): Promise<void> {
   try {
-    console.log('[RuSheet] Initializing application...');
-
     // Step 1: Initialize WASM module
-    console.log('[RuSheet] Loading WASM module...');
     await WasmBridge.initWasm();
-    console.log('[RuSheet] WASM module loaded successfully');
 
     // Step 1.5: Initialize persistence and try to load saved data
-    console.log('[RuSheet] Initializing persistence...');
     const persistence = new PersistenceManager();
     const hasData = persistence.load();
-    if (hasData) {
-      console.log('[RuSheet] Loaded saved workbook from previous session');
-    } else {
-      console.log('[RuSheet] Starting with empty workbook');
-    }
 
     // Step 2: Get DOM elements
-    console.log('[RuSheet] Getting DOM elements...');
     const canvas = document.getElementById('spreadsheet-canvas') as HTMLCanvasElement;
     const formulaInput = document.getElementById('formula-input') as HTMLInputElement;
     const cellAddress = document.getElementById('cell-address') as HTMLSpanElement;
@@ -61,18 +50,14 @@ async function main(): Promise<void> {
     if (!canvas || !formulaInput || !cellAddress || !addSheetBtn || !container) {
       throw new Error('Failed to find required DOM elements');
     }
-    console.log('[RuSheet] DOM elements found');
 
     // Step 3: Create GridRenderer (or RenderController for offscreen mode)
-    console.log('[RuSheet] Creating grid renderer...');
     let renderer: IGridRenderer;
 
     const useOffscreen = USE_OFFSCREEN_CANVAS && isOffscreenCanvasSupported();
     if (useOffscreen) {
-      console.log('[RuSheet] Using OffscreenCanvas worker rendering');
       renderer = new RenderController(canvas, {
         onReady: () => {
-          console.log('[RuSheet] Render worker ready');
           renderer.render();
         },
         onError: (msg) => {
@@ -80,18 +65,13 @@ async function main(): Promise<void> {
         },
       });
     } else {
-      if (USE_OFFSCREEN_CANVAS) {
-        console.log('[RuSheet] OffscreenCanvas not supported, falling back to direct rendering');
-      }
       renderer = new GridRenderer(canvas);
     }
 
     // Step 4: Create CellEditor
-    console.log('[RuSheet] Creating cell editor...');
     const cellEditor = new CellEditor(container, renderer, WasmBridge, formulaInput);
 
     // Step 5: Create InputController with edit mode callback
-    console.log('[RuSheet] Creating input controller...');
     const editModeCallback = (row: number, col: number) => {
       cellEditor.activate(row, col);
     };
@@ -99,7 +79,6 @@ async function main(): Promise<void> {
     new InputController(canvas, renderer, editModeCallback);
 
     // Step 6: Set up window resize handler
-    console.log('[RuSheet] Setting up resize handler...');
     const resizeCanvas = () => {
       const containerRect = container.getBoundingClientRect();
       const width = containerRect.width;
@@ -124,8 +103,6 @@ async function main(): Promise<void> {
     window.addEventListener('resize', resizeCanvas);
 
     // Step 7: Update cell address display when selection changes
-    console.log('[RuSheet] Setting up cell selection tracking...');
-
     // Helper to update cell address display
     const updateCellAddressDisplay = () => {
       const activeCell = renderer.getActiveCell();
@@ -146,12 +123,10 @@ async function main(): Promise<void> {
     });
 
     // Step 8: Set up add sheet button
-    console.log('[RuSheet] Setting up sheet management...');
     let sheetCounter = 2;
     addSheetBtn.addEventListener('click', () => {
       const sheetName = `Sheet${sheetCounter}`;
       const newIndex = WasmBridge.addSheet(sheetName);
-      console.log(`[RuSheet] Added new sheet: ${sheetName} at index ${newIndex}`);
 
       // Create new sheet tab
       const sheetTab = document.createElement('div');
@@ -190,13 +165,11 @@ async function main(): Promise<void> {
         // Set active sheet in WASM
         WasmBridge.setActiveSheet(index);
 
-        console.log(`[RuSheet] Switched to sheet index ${index}`);
         renderWithAddressUpdate();
       }
     });
 
     // Set up persistence buttons
-    console.log('[RuSheet] Setting up persistence buttons...');
     const saveBtn = document.getElementById('save-btn');
     const loadBtn = document.getElementById('load-btn');
     const exportBtn = document.getElementById('export-btn');
@@ -254,7 +227,6 @@ async function main(): Promise<void> {
     });
 
     // Set up autocomplete toggle
-    console.log('[RuSheet] Setting up autocomplete toggle...');
     const autocompleteToggle = document.getElementById('autocomplete-toggle') as HTMLInputElement;
     if (autocompleteToggle) {
       // Load preference
@@ -271,8 +243,6 @@ async function main(): Promise<void> {
 
     // Step 9: Add test data to demonstrate functionality (only if no data was loaded)
     if (!hasData) {
-      console.log('[RuSheet] Adding test data...');
-
       // Add header row
       WasmBridge.setCellValue(0, 0, 'Product');
       WasmBridge.setCellValue(0, 1, 'Quantity');
@@ -309,16 +279,10 @@ async function main(): Promise<void> {
       WasmBridge.setRangeFormat(4, 0, 4, 3, {
         bold: true,
       });
-
-      console.log('[RuSheet] Test data added');
     }
 
     // Step 10: Initial render
-    console.log('[RuSheet] Performing initial render...');
     renderWithAddressUpdate();
-
-    console.log('[RuSheet] Application initialized successfully!');
-    console.log('[RuSheet] Ready to use');
 
   } catch (error) {
     console.error('[RuSheet] Initialization failed:', error);

@@ -9,7 +9,7 @@ default: dev
 
 # Install dependencies
 install:
-    npm install
+    pnpm install
 
 # Build WASM module
 build-wasm:
@@ -17,11 +17,11 @@ build-wasm:
 
 # Build everything (WASM + frontend)
 build: build-wasm
-    npm run build
+    pnpm run build
 
 # Development server
 dev: build-wasm
-    npm run dev
+    pnpm run dev
 
 # Type check TypeScript
 check-ts:
@@ -72,7 +72,7 @@ update-rust:
 # Run the example
 example: build-wasm
     cp -r pkg example/src/pkg
-    cd example && npm install && npm run dev -- -p 3300
+    cd example && pnpm install && pnpm run dev -- -p 3300
 
 # Documentation commands
 docs-dev:

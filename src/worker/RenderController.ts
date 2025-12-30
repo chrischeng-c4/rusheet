@@ -43,7 +43,6 @@ export class RenderController implements IGridRenderer {
     // Set up message handler
     this.worker.onmessage = this.handleWorkerMessage.bind(this);
     this.worker.onerror = (error) => {
-      console.error('[RenderController] Worker error:', error);
       options.onError?.(`Worker error: ${error.message}`);
     };
 
@@ -76,7 +75,6 @@ export class RenderController implements IGridRenderer {
     switch (msg.type) {
       case 'READY':
         this.isReady = true;
-        console.log('[RenderController] Worker ready');
         this.options.onReady?.();
         break;
 
@@ -90,7 +88,6 @@ export class RenderController implements IGridRenderer {
         break;
 
       case 'ERROR':
-        console.error('[RenderController] Worker error:', msg.message, msg.stack);
         this.options.onError?.(msg.message);
         break;
     }

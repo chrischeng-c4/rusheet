@@ -13,22 +13,12 @@ export class PersistenceManager {
     try {
       const json = localStorage.getItem(PersistenceManager.STORAGE_KEY);
       if (!json) {
-        console.log('[Persistence] No saved data found');
         return false;
       }
 
-      console.log('[Persistence] Loading workbook from localStorage...');
       const success = WasmBridge.deserialize(json);
-
-      if (success) {
-        console.log('[Persistence] Workbook loaded successfully');
-      } else {
-        console.error('[Persistence] Failed to deserialize workbook data');
-      }
-
       return success;
     } catch (error) {
-      console.error('[Persistence] Error loading workbook:', error);
       return false;
     }
   }
@@ -40,10 +30,8 @@ export class PersistenceManager {
     try {
       const json = WasmBridge.serialize();
       localStorage.setItem(PersistenceManager.STORAGE_KEY, json);
-      console.log('[Persistence] Workbook saved to localStorage');
       return true;
     } catch (error) {
-      console.error('[Persistence] Error saving workbook:', error);
       return false;
     }
   }
@@ -71,10 +59,8 @@ export class PersistenceManager {
   public clear(): boolean {
     try {
       localStorage.removeItem(PersistenceManager.STORAGE_KEY);
-      console.log('[Persistence] Cleared saved workbook data');
       return true;
     } catch (error) {
-      console.error('[Persistence] Error clearing workbook:', error);
       return false;
     }
   }
@@ -94,9 +80,8 @@ export class PersistenceManager {
       link.click();
 
       URL.revokeObjectURL(url);
-      console.log('[Persistence] Exported workbook to file');
     } catch (error) {
-      console.error('[Persistence] Error exporting workbook:', error);
+      // Silent failure
     }
   }
 
@@ -112,22 +97,17 @@ export class PersistenceManager {
         const success = WasmBridge.deserialize(json);
 
         if (success) {
-          console.log('[Persistence] Imported workbook from file');
           // Save to localStorage after successful import
           this.save();
-        } else {
-          console.error('[Persistence] Failed to import workbook');
         }
 
         onComplete(success);
       } catch (error) {
-        console.error('[Persistence] Error importing workbook:', error);
         onComplete(false);
       }
     };
 
     reader.onerror = () => {
-      console.error('[Persistence] Error reading file');
       onComplete(false);
     };
 

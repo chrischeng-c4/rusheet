@@ -492,5 +492,3 @@ self.onmessage = (event: MessageEvent<MainToWorkerMessage>) => {
     });
   }
 };
-
-console.log('[RenderWorker] Initialized');

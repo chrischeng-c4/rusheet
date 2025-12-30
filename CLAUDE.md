@@ -47,3 +47,32 @@ The main Claude thread acts as an orchestrator ONLY:
 - Rust WASM spreadsheet application
 - Crates: rusheet-core, rusheet-formula, rusheet-wasm, rusheet-history
 - Frontend: TypeScript + Vite + Canvas rendering
+
+## Package Manager
+
+**Use pnpm exclusively** - Do NOT use npm.
+
+```bash
+# Install dependencies
+pnpm install
+
+# Run dev server
+pnpm run dev
+
+# Run tests
+pnpm test:unit
+pnpm test:integration
+
+# Build
+pnpm run build
+```
+
+## Common Commands (via justfile)
+
+```bash
+just dev          # Build WASM + start dev server
+just build        # Full production build
+just test-rust    # Run Rust tests
+just test-unit    # Run TS unit tests
+just test-integration  # Run browser integration tests
+```
