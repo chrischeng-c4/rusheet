@@ -279,11 +279,13 @@ This document outlines all pending work, known issues, and future features for R
   - 擴充機制
   - 自訂函數
 
-### Testing (Blocked)
+### Testing ✅
 
-- [ ] **Fix WASM Loading in Node.js Tests** - 88 tests blocked
-  - Error: `WebAssembly.instantiate(): Argument 0 must be a buffer source`
-  - See "Testing Issues" section below
+- [x] **Fix WASM Loading in Node.js Tests** ✅ (2025-12-30)
+  - Fixed missing dependencies (papaparse, xlsx)
+  - Rebuilt WASM module with getMergedRanges
+  - Updated Vitest 4 config (poolOptions → singleFork)
+  - 121 unit tests + 131 integration tests passing
 
 ---
 
@@ -381,60 +383,31 @@ This document outlines all pending work, known issues, and future features for R
 
 ---
 
-## Testing Issues
+## Testing
 
-### WASM Loading in Node.js Environment
-
-**Status:** 🔴 Blocking 88 integration tests
-
-**Problem:**
-```
-TypeError: WebAssembly.instantiate(): Argument 0 must be a buffer source
-  at __wbg_load (pkg/rusheet_wasm.js:470:44)
-```
-
-**Root Cause:**
-- WASM wrapper uses `fetch()` to load `.wasm` file
-- Node.js test environment has no HTTP server
-- `fetch()` polyfill loads from filesystem
-- ArrayBuffer format mismatch when converting Node Buffer → WASM ArrayBuffer
-
-**Attempted Solutions:**
-```typescript
-// Attempt 1: Polyfill fetch (failed)
-globalThis.fetch = async (url) => {
-  const buffer = readFileSync('pkg/rusheet_wasm_bg.wasm');
-  return { arrayBuffer: async () => buffer.buffer.slice(...) };
-};
-
-// Attempt 2: Uint8Array conversion (failed)
-const uint8Array = new Uint8Array(buffer);
-const arrayBuffer = uint8Array.buffer;
-```
-
-**Recommended Solutions (choose one):**
-
-1. **Browser-based Tests** (Recommended)
-   - Use Vitest browser mode with Playwright
-   - Config exists: `vite.config.browser.ts`
-   - Run: `pnpm test:integration`
-
-2. **Split Test Strategy**
-   - Unit tests in Node (fast, no WASM)
-   - Integration tests in browser (slower, real WASM)
-
-3. **WASM Mock** (Not recommended)
-   - JavaScript mock of WASM API
-   - Defeats purpose of integration tests
-
-### Current Test Coverage
+### Current Test Coverage ✅
 
 | Type | Count | Status |
 |------|-------|--------|
 | Rust Tests | 394 | ✅ 100% passing |
-| TS Unit Tests | 62 | ✅ Passing |
-| TS Integration | ~88 | ⚠️ WASM blocked |
+| TS Unit Tests | 121 | ✅ Passing |
+| TS Integration | 131 | ✅ Passing (1 flaky) |
 | E2E (Playwright) | 2 files | ✅ Running |
+
+### WASM Loading in Node.js Environment ✅ RESOLVED
+
+**Status:** 🟢 Fixed (2025-12-30)
+
+**Resolution:**
+The issue was not actually with WASM loading mechanism, but with:
+1. Missing npm dependencies (`papaparse`, `xlsx`) not installed
+2. WASM module needed rebuild to include new `getMergedRanges` function
+3. Vitest 4 config deprecation (`poolOptions` → top-level `singleFork`)
+
+**Working Setup (in `src/__tests__/setup.ts`):**
+- Custom `fetch()` override loads WASM from filesystem
+- `WebAssembly.instantiateStreaming` disabled to force fallback path
+- Canvas 2D context mock for Node.js environment
 
 ---
 
