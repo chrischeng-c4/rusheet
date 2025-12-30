@@ -1,5 +1,6 @@
 import type { IGridRenderer } from '../types/renderer';
 import * as WasmBridge from '../core/WasmBridge';
+import { FilterDropdown } from './FilterDropdown';
 
 type EditModeCallback = (row: number, col: number) => void;
 
@@ -7,6 +8,7 @@ export default class InputController {
   private canvas: HTMLCanvasElement;
   private gridRenderer: IGridRenderer;
   private editModeCallback: EditModeCallback;
+  private filterDropdown: FilterDropdown;
 
   // Event handler references for cleanup
   private mouseDownHandler: (e: MouseEvent) => void;
@@ -21,6 +23,11 @@ export default class InputController {
     this.canvas = canvas;
     this.gridRenderer = gridRenderer;
     this.editModeCallback = editModeCallback;
+
+    // Initialize filter dropdown
+    this.filterDropdown = new FilterDropdown({
+      onClose: () => this.gridRenderer.render()
+    });
 
     // Bind event handlers
     this.mouseDownHandler = this.handleMouseDown.bind(this);
@@ -48,6 +55,25 @@ export default class InputController {
     const rect = this.canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    // Check if clicking on filter button (before other click handling)
+    const filterCol = this.gridRenderer.isOnFilterButton(x, y);
+    if (filterCol >= 0) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Calculate dropdown position
+      const colPos = this.gridRenderer.gridToScreen(0, filterCol);
+      const headerHeight = 24; // from theme
+
+      // Show filter dropdown below the header
+      this.filterDropdown.show(
+        filterCol,
+        rect.left + colPos.x,
+        rect.top + headerHeight + 2
+      );
+      return;
+    }
 
     // Convert screen coordinates to grid coordinates
     const cellPosition = this.gridRenderer.screenToGrid(x, y);
@@ -204,5 +230,6 @@ export default class InputController {
     this.canvas.removeEventListener('mousedown', this.mouseDownHandler);
     this.canvas.removeEventListener('wheel', this.wheelHandler);
     document.removeEventListener('keydown', this.keyDownHandler);
+    this.filterDropdown?.destroy();
   }
 }

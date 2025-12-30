@@ -28,7 +28,7 @@ This document outlines all pending work, known issues, and future features for R
 |----------|--------|------|
 | 排序（單欄/多欄）| P1 | ✅ 已完成 |
 | 合併儲存格 | P1 | ✅ 已完成 |
-| 篩選/自動篩選 | P1 | ❌ |
+| 篩選/自動篩選 | P1 | ✅ 已完成 |
 | 條件格式 | P2 | ❌ |
 | 資料驗證（下拉選單）| P2 | ❌ |
 | 樞紐分析表 | P3 | ❌ |
@@ -191,9 +191,11 @@ This document outlines all pending work, known issues, and future features for R
   - Canvas 渲染：合併區域背景、跳過 slave cells、選取區覆蓋整個合併範圍
   - 17 unit tests passing
 
-- [ ] **Filtering / AutoFilter**
+- [x] **Filtering / AutoFilter** ✅ (2025-12-31)
   - 自動篩選下拉選單
-  - 多條件篩選
+  - 多欄篩選（AND 邏輯）
+  - Undo/redo 支援
+  - 20 unit tests passing
 
 #### 匯入匯出
 - [x] **XLSX Import/Export** ✅ (2025-12-30)
@@ -392,7 +394,7 @@ This document outlines all pending work, known issues, and future features for R
 | Type | Count | Status |
 |------|-------|--------|
 | Rust Tests | 394 | ✅ 100% passing |
-| TS Unit Tests | 121 | ✅ Passing |
+| TS Unit Tests | 141 | ✅ Passing |
 | TS Integration | 131 | ✅ Passing (1 flaky) |
 | E2E (Playwright) | 2 files | ✅ Running |
 
@@ -484,7 +486,7 @@ The issue was not actually with WASM loading mechanism, but with:
 - `onFormatChange`, `onSheetAdd/Delete/Rename`, `onActiveSheetChange`
 - `onUndo`, `onRedo`
 - `onRowsInsert`, `onRowsDelete`, `onColsInsert`, `onColsDelete`
-- `onSortRange`
+- `onSortRange`, `onFilterChange`
 
 **Import/Export:** ✅ (2025-12-30)
 - CSV: `exportCSV()`, `importCSV()`, `downloadCSV()`, `importCSVFile()`
@@ -497,6 +499,13 @@ The issue was not actually with WASM loading mechanism, but with:
 - `mergeCells(startRow, startCol, endRow, endCol)`
 - `unmergeCells(row, col)`
 - `getMergedRanges()`, `getMergeInfo(row, col)`, `isMergedSlave(row, col)`
+
+**Filtering:** ✅ (2025-12-31)
+- `getUniqueValuesInColumn(col, maxRows?)`
+- `applyColumnFilter(col, visibleValues, maxRows?)`
+- `clearColumnFilter(col)`, `clearAllFilters()`
+- `getActiveFilters()`, `isRowHidden(row)`
+- `onFilterChange` event
 
 **Collaboration Server API:** ✅
 - `GET/POST /api/workbooks` - List/create workbooks

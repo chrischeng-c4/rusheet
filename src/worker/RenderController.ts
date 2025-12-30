@@ -253,6 +253,34 @@ export class RenderController implements IGridRenderer {
   }
 
   /**
+   * Check if coordinates are within a filter button area
+   * Returns the column index if on a filter button, -1 otherwise
+   */
+  public isOnFilterButton(screenX: number, screenY: number): number {
+    const { headerHeight, headerWidth } = theme;
+
+    // Must be in header row (y < headerHeight)
+    if (screenY > headerHeight || screenX < headerWidth) {
+      return -1;
+    }
+
+    // Find which column
+    const { col } = this.screenToGrid(screenX, 0);
+
+    // Get column position
+    const colPos = this.gridToScreen(0, col);
+    const colWidth = WasmBridge.getColWidth(col);
+
+    // Check if click is in the filter button area (rightmost 20px of header)
+    const filterButtonLeft = colPos.x + colWidth - 20;
+    if (screenX >= filterButtonLeft && screenX <= colPos.x + colWidth) {
+      return col;
+    }
+
+    return -1;
+  }
+
+  /**
    * Terminate the worker.
    */
   public destroy(): void {

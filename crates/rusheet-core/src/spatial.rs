@@ -414,6 +414,11 @@ impl SpatialIndex {
         self.hidden_cols.contains(&col)
     }
 
+    /// Returns a vector of all hidden row indices.
+    pub fn get_hidden_rows(&self) -> Vec<usize> {
+        self.hidden_rows.iter().copied().collect()
+    }
+
     /// Rebuilds the row heights Fenwick tree from the given row index onwards.
     ///
     /// This is necessary after insert/delete operations since Fenwick trees

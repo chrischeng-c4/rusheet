@@ -230,6 +230,49 @@ export function recalculateAll(): void {
 }
 
 // =============================================================================
+// Filter Functions
+// =============================================================================
+
+export function getUniqueValuesInColumn(col: number, maxRows: number = 10000): string[] {
+  const json = getEngine().getUniqueValuesInColumn(col, maxRows);
+  return JSON.parse(json);
+}
+
+export function applyColumnFilter(col: number, visibleValues: string[], maxRows: number = 10000): [number, number][] {
+  const json = getEngine().applyColumnFilter(col, JSON.stringify(visibleValues), maxRows);
+  return JSON.parse(json);
+}
+
+export function clearColumnFilter(col: number): [number, number][] {
+  const json = getEngine().clearColumnFilter(col);
+  return JSON.parse(json);
+}
+
+export function clearAllFilters(): [number, number][] {
+  const json = getEngine().clearAllFilters();
+  return JSON.parse(json);
+}
+
+export interface FilterState {
+  col: number;
+  visibleValues: string[];
+}
+
+export function getActiveFilters(): FilterState[] {
+  const json = getEngine().getActiveFilters();
+  return JSON.parse(json);
+}
+
+export function isRowHidden(row: number): boolean {
+  return getEngine().isRowHidden(row);
+}
+
+export function getHiddenRows(): number[] {
+  const json = getEngine().getHiddenRows();
+  return JSON.parse(json);
+}
+
+// =============================================================================
 // Zero-Copy Viewport API
 // =============================================================================
 

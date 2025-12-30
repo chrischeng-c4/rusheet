@@ -139,3 +139,12 @@ export interface UnmergeCellsEvent {
 export interface DataLoadedEvent {
   rows: number;
 }
+
+// Filter change event
+export interface FilterChangeEvent {
+  col?: number;
+  visibleValues?: string[];
+  cleared?: boolean;
+  all?: boolean;
+  affected: [number, number][];
+}

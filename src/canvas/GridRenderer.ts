@@ -1,6 +1,7 @@
 import { theme } from './theme';
 import type { CellData as _CellData } from '../types';
 import * as WasmBridge from '../core/WasmBridge';
+import { rusheet } from '../core/RusheetAPI';
 
 interface Point {
   x: number;
@@ -146,6 +147,42 @@ export default class GridRenderer {
       if (num < 0) break;
     }
     return result;
+  }
+
+  /**
+   * Check if a column has an active filter
+   */
+  private hasActiveFilter(col: number): boolean {
+    const activeFilters = rusheet.getActiveFilters();
+    return activeFilters.some(f => f.col === col);
+  }
+
+  /**
+   * Check if coordinates are within a filter button area
+   * Returns the column index if on a filter button, -1 otherwise
+   */
+  public isOnFilterButton(screenX: number, screenY: number): number {
+    const { headerHeight, headerWidth } = theme;
+
+    // Must be in header row (y < headerHeight)
+    if (screenY > headerHeight || screenX < headerWidth) {
+      return -1;
+    }
+
+    // Find which column
+    const { col } = this.screenToGrid(screenX, 0);
+
+    // Get column position
+    const colPos = this.gridToScreen(0, col);
+    const colWidth = WasmBridge.getColWidth(col);
+
+    // Check if click is in the filter button area (rightmost 20px of header)
+    const filterButtonLeft = colPos.x + colWidth - 20;
+    if (screenX >= filterButtonLeft && screenX <= colPos.x + colWidth) {
+      return col;
+    }
+
+    return -1;
   }
 
   /**
@@ -421,6 +458,20 @@ export default class GridRenderer {
 
       if (centerX >= theme.headerWidth && centerX <= this.viewportSize.width) {
         ctx.fillText(this.colToLetter(col), centerX, centerY);
+
+        // Draw filter button
+        const filterButtonX = pos.x + colWidth - 16;  // 16px from right edge
+        const filterButtonY = theme.headerHeight / 2;
+        ctx.font = '10px Arial';
+        ctx.fillStyle = this.hasActiveFilter(col) ? '#1976d2' : '#999';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('▼', filterButtonX, filterButtonY);
+
+        // Restore text alignment and font for next header
+        ctx.font = theme.headerFont;
+        ctx.fillStyle = theme.headerText;
+        ctx.textAlign = 'center';
       }
     }
 

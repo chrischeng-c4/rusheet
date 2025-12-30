@@ -46,6 +46,12 @@ export interface IGridRenderer {
   screenToGrid(x: number, y: number): CellPosition;
 
   /**
+   * Check if coordinates are within a filter button area
+   * Returns the column index if on a filter button, -1 otherwise
+   */
+  isOnFilterButton(screenX: number, screenY: number): number;
+
+  /**
    * Trigger a render
    */
   render(): void;

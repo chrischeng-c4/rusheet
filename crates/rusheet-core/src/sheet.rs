@@ -1,10 +1,17 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::cell::{Cell, CellContent, CellValue};
 use crate::chunk::ChunkedGrid;
 use crate::range::{CellCoord, CellRange};
 use crate::spatial::SpatialIndex;
+
+/// Represents a filter applied to a column
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilterState {
+    pub col: u32,
+    pub visible_values: HashSet<String>,
+}
 
 /// Default row height in pixels
 pub const DEFAULT_ROW_HEIGHT: f64 = 24.0;
@@ -40,6 +47,9 @@ pub struct Sheet {
     /// Merged cell ranges - each range represents a merged area with top-left as master cell
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub merged_ranges: Vec<CellRange>,
+    /// Active column filters
+    #[serde(default)]
+    pub active_filters: Vec<FilterState>,
     /// Spatial index for O(log N) position lookups (rebuilt on deserialize)
     #[serde(skip, default = "SpatialIndex::new")]
     spatial: SpatialIndex,
@@ -163,6 +173,7 @@ impl Sheet {
             frozen_rows: 0,
             frozen_cols: 0,
             merged_ranges: Vec::new(),
+            active_filters: Vec::new(),
             spatial: SpatialIndex::new(),
         }
     }
@@ -779,6 +790,133 @@ impl Sheet {
     pub fn would_overlap_merge(&self, range: &CellRange) -> bool {
         self.merged_ranges.iter().any(|r| r.intersects(range))
     }
+
+    // =========================================================================
+    // Filtering
+    // =========================================================================
+
+    /// Hide specific rows
+    pub fn hide_rows(&mut self, rows: &[u32]) {
+        for &row in rows {
+            self.spatial.hide_row(row as usize);
+        }
+    }
+
+    /// Show (unhide) specific rows
+    pub fn show_rows(&mut self, rows: &[u32]) {
+        for &row in rows {
+            self.spatial.unhide_row(row as usize);
+        }
+    }
+
+    /// Check if a row is hidden
+    pub fn is_row_hidden(&self, row: u32) -> bool {
+        self.spatial.is_row_hidden(row as usize)
+    }
+
+    /// Get all hidden rows
+    pub fn get_hidden_rows(&self) -> Vec<u32> {
+        self.spatial.get_hidden_rows().iter().map(|&r| r as u32).collect()
+    }
+
+    /// Get unique values in a column (for filter dropdown)
+    pub fn get_unique_values_in_column(&self, col: u32, max_rows: u32) -> Vec<String> {
+        let mut values = HashSet::new();
+        for row in 0..max_rows {
+            if let Some(cell) = self.get_cell(CellCoord::new(row, col)) {
+                let value = cell.computed_value().as_text();
+                if !value.is_empty() {
+                    values.insert(value);
+                }
+            }
+        }
+        let mut result: Vec<String> = values.into_iter().collect();
+        result.sort();
+        result
+    }
+
+    /// Apply a column filter - hide rows where cell value not in visible_values
+    /// Returns the rows that were hidden
+    pub fn apply_column_filter(&mut self, col: u32, visible_values: &HashSet<String>, max_rows: u32) -> Vec<u32> {
+        let mut rows_to_hide = Vec::new();
+
+        for row in 0..max_rows {
+            let value = self.get_cell(CellCoord::new(row, col))
+                .map(|c| c.computed_value().as_text())
+                .unwrap_or_default();
+
+            // If cell value is not in visible set, hide the row
+            // Empty cells are hidden unless empty string is in visible_values
+            if !visible_values.contains(&value) {
+                rows_to_hide.push(row);
+            }
+        }
+
+        // Hide the rows
+        self.hide_rows(&rows_to_hide);
+
+        // Store the filter state
+        self.active_filters.retain(|f| f.col != col);
+        self.active_filters.push(FilterState {
+            col,
+            visible_values: visible_values.clone(),
+        });
+
+        rows_to_hide
+    }
+
+    /// Clear filter on a specific column
+    /// Returns the rows that were unhidden
+    pub fn clear_column_filter(&mut self, col: u32) -> Vec<u32> {
+        let hidden_before: HashSet<u32> = self.get_hidden_rows().into_iter().collect();
+
+        // Remove the filter
+        self.active_filters.retain(|f| f.col != col);
+
+        // Show all rows (we'll re-hide based on remaining filters)
+        for row in hidden_before.iter() {
+            self.show_rows(&[*row]);
+        }
+
+        // Re-apply remaining filters
+        // This is needed because multiple filters can hide the same row
+        let rows_still_hidden = self.reapply_all_filters();
+
+        // Return rows that were unhidden
+        hidden_before.difference(&rows_still_hidden.into_iter().collect()).copied().collect()
+    }
+
+    /// Clear all filters
+    pub fn clear_all_filters(&mut self) -> Vec<u32> {
+        let hidden_rows = self.get_hidden_rows();
+
+        // Show all rows
+        self.show_rows(&hidden_rows);
+
+        // Clear all filter state
+        self.active_filters.clear();
+
+        hidden_rows
+    }
+
+    /// Re-apply all active filters (used after clearing one filter)
+    fn reapply_all_filters(&mut self) -> Vec<u32> {
+        let filters = self.active_filters.clone();
+        self.active_filters.clear();
+
+        let mut all_hidden = HashSet::new();
+        for filter in filters {
+            let hidden = self.apply_column_filter(filter.col, &filter.visible_values, 10000);
+            all_hidden.extend(hidden);
+        }
+
+        all_hidden.into_iter().collect()
+    }
+
+    /// Get active filters
+    pub fn get_active_filters(&self) -> &[FilterState] {
+        &self.active_filters
+    }
 }
 
 // Custom Deserialize implementation to rebuild spatial index after deserialization
@@ -807,6 +945,8 @@ impl<'de> Deserialize<'de> for Sheet {
             frozen_cols: u32,
             #[serde(default)]
             merged_ranges: Vec<CellRange>,
+            #[serde(default)]
+            active_filters: Vec<FilterState>,
         }
 
         let helper = SheetHelper::deserialize(deserializer)?;
@@ -821,6 +961,7 @@ impl<'de> Deserialize<'de> for Sheet {
             frozen_rows: helper.frozen_rows,
             frozen_cols: helper.frozen_cols,
             merged_ranges: helper.merged_ranges,
+            active_filters: helper.active_filters,
             spatial: SpatialIndex::new(),
         };
 

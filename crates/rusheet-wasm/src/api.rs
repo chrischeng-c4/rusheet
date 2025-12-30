@@ -1,9 +1,9 @@
 use rusheet_core::{CellContent, CellCoord, CellError, CellFormat, CellValue, HorizontalAlign, VerticalAlign, Workbook};
 use rusheet_formula::{extract_references, DependencyGraph};
 use rusheet_history::{
-    ClearRangeCommand, HistoryManager, MergeCellsCommand, SetCellFormatCommand, SetCellValueCommand,
-    SetRangeFormatCommand, InsertRowsCommand, DeleteRowsCommand, InsertColsCommand, DeleteColsCommand,
-    SortRangeCommand, UnmergeCellsCommand,
+    ApplyFilterCommand, ClearFilterCommand, ClearRangeCommand, HistoryManager, MergeCellsCommand,
+    SetCellFormatCommand, SetCellValueCommand, SetRangeFormatCommand, InsertRowsCommand,
+    DeleteRowsCommand, InsertColsCommand, DeleteColsCommand, SortRangeCommand, UnmergeCellsCommand,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -290,6 +290,10 @@ impl SpreadsheetEngine {
         let mut cells: Vec<CellData> = Vec::new();
 
         for row in start_row..=end_row {
+            // Skip hidden rows (filtered out)
+            if sheet.is_row_hidden(row) {
+                continue;
+            }
             for col in start_col..=end_col {
                 let coord = CellCoord::new(row, col);
                 if let Some(cell) = sheet.get_cell(coord) {
@@ -680,6 +684,86 @@ impl SpreadsheetEngine {
         }
     }
 
+    // --- Filtering ---
+
+    /// Get unique values in a column for filter dropdown
+    #[wasm_bindgen(js_name = getUniqueValuesInColumn)]
+    pub fn get_unique_values_in_column(&self, col: u32, max_rows: u32) -> String {
+        let sheet = self.workbook.active_sheet();
+        let values = sheet.get_unique_values_in_column(col, max_rows);
+        serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Apply a column filter
+    /// values_json is a JSON array of string values to show
+    /// Returns JSON array of affected row indices
+    #[wasm_bindgen(js_name = applyColumnFilter)]
+    pub fn apply_column_filter(&mut self, col: u32, values_json: &str, max_rows: u32) -> String {
+        // Parse the values
+        let visible_values: HashSet<String> = match serde_json::from_str(values_json) {
+            Ok(v) => v,
+            Err(_) => return "[]".to_string(),
+        };
+
+        let cmd = Box::new(ApplyFilterCommand::new(col, visible_values, max_rows));
+        let affected = self.history.execute(cmd, self.workbook.active_sheet_mut());
+
+        let coords: Vec<[u32; 2]> = affected.iter().map(|c| [c.row, c.col]).collect();
+        serde_json::to_string(&coords).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Clear filter on a specific column
+    /// Returns JSON array of affected row indices
+    #[wasm_bindgen(js_name = clearColumnFilter)]
+    pub fn clear_column_filter(&mut self, col: u32) -> String {
+        let cmd = Box::new(ClearFilterCommand::new(Some(col)));
+        let affected = self.history.execute(cmd, self.workbook.active_sheet_mut());
+
+        let coords: Vec<[u32; 2]> = affected.iter().map(|c| [c.row, c.col]).collect();
+        serde_json::to_string(&coords).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Clear all filters
+    /// Returns JSON array of affected row indices
+    #[wasm_bindgen(js_name = clearAllFilters)]
+    pub fn clear_all_filters(&mut self) -> String {
+        let cmd = Box::new(ClearFilterCommand::new(None));
+        let affected = self.history.execute(cmd, self.workbook.active_sheet_mut());
+
+        let coords: Vec<[u32; 2]> = affected.iter().map(|c| [c.row, c.col]).collect();
+        serde_json::to_string(&coords).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Get active filters as JSON
+    #[wasm_bindgen(js_name = getActiveFilters)]
+    pub fn get_active_filters(&self) -> String {
+        let sheet = self.workbook.active_sheet();
+        let filters = sheet.get_active_filters();
+
+        // Convert to a simpler format for JS
+        let js_filters: Vec<serde_json::Value> = filters.iter().map(|f| {
+            serde_json::json!({
+                "col": f.col,
+                "visibleValues": f.visible_values.iter().collect::<Vec<_>>()
+            })
+        }).collect();
+
+        serde_json::to_string(&js_filters).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Check if a row is hidden
+    #[wasm_bindgen(js_name = isRowHidden)]
+    pub fn is_row_hidden(&self, row: u32) -> bool {
+        self.workbook.active_sheet().is_row_hidden(row)
+    }
+
+    /// Get all hidden rows
+    #[wasm_bindgen(js_name = getHiddenRows)]
+    pub fn get_hidden_rows(&self) -> String {
+        let hidden = self.workbook.active_sheet().get_hidden_rows();
+        serde_json::to_string(&hidden).unwrap_or_else(|_| "[]".to_string())
+    }
+
     // --- Serialization ---
 
     /// Serialize workbook to JSON
@@ -773,6 +857,10 @@ impl SpreadsheetEngine {
         let sheet = self.workbook.active_sheet();
 
         for row in start_row..=end_row {
+            // Skip hidden rows (filtered out)
+            if sheet.is_row_hidden(row) {
+                continue;
+            }
             for col in start_col..=end_col {
                 let coord = CellCoord::new(row, col);
                 if let Some(cell) = sheet.get_cell(coord) {

@@ -18,7 +18,8 @@ import type {
   ColsDeleteEvent,
   SortRangeEvent,
   MergeCellsEvent,
-  UnmergeCellsEvent
+  UnmergeCellsEvent,
+  FilterChangeEvent
 } from '../types/events';
 
 export interface CellChangeEvent {
@@ -133,6 +134,10 @@ export class RusheetAPI {
 
   onUnmergeCells(callback: (event: UnmergeCellsEvent) => void): () => void {
     return emitter.on('unmergeCells', callback);
+  }
+
+  onFilterChange(callback: (event: FilterChangeEvent) => void): () => void {
+    return emitter.on('filterChange', callback);
   }
 
   // Cell operations (wrap WasmBridge and emit events)
@@ -740,6 +745,62 @@ export class RusheetAPI {
   }
   getViewportArrays(startRow: number, endRow: number, startCol: number, endCol: number) {
     return WasmBridge.getViewportArrays(startRow, endRow, startCol, endCol);
+  }
+
+  // Filtering
+  /**
+   * Get unique values in a column (for filter dropdown)
+   */
+  getUniqueValuesInColumn(col: number, maxRows: number = 10000): string[] {
+    return WasmBridge.getUniqueValuesInColumn(col, maxRows);
+  }
+
+  /**
+   * Apply a column filter - show only rows with values in the visible set
+   */
+  applyColumnFilter(col: number, visibleValues: string[], maxRows: number = 10000): void {
+    const affected = WasmBridge.applyColumnFilter(col, visibleValues, maxRows);
+    emitter.emit<FilterChangeEvent>('filterChange', { col, visibleValues, affected });
+    emitter.emit('change', { type: 'filter', col });
+  }
+
+  /**
+   * Clear filter on a specific column
+   */
+  clearColumnFilter(col: number): void {
+    const affected = WasmBridge.clearColumnFilter(col);
+    emitter.emit<FilterChangeEvent>('filterChange', { col, cleared: true, affected });
+    emitter.emit('change', { type: 'filter', col });
+  }
+
+  /**
+   * Clear all filters
+   */
+  clearAllFilters(): void {
+    const affected = WasmBridge.clearAllFilters();
+    emitter.emit<FilterChangeEvent>('filterChange', { cleared: true, all: true, affected });
+    emitter.emit('change', { type: 'filter' });
+  }
+
+  /**
+   * Get active filters
+   */
+  getActiveFilters(): WasmBridge.FilterState[] {
+    return WasmBridge.getActiveFilters();
+  }
+
+  /**
+   * Check if a row is hidden by filters
+   */
+  isRowHidden(row: number): boolean {
+    return WasmBridge.isRowHidden(row);
+  }
+
+  /**
+   * Get all hidden rows
+   */
+  getHiddenRows(): number[] {
+    return WasmBridge.getHiddenRows();
   }
 
   // Cleanup

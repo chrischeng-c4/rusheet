@@ -173,6 +173,11 @@ async function main(): Promise<void> {
       updateCellAddressDisplay();
     };
 
+    // Listen to filter changes and re-render
+    rusheet.onFilterChange(() => {
+      renderer.render();
+    });
+
     // Set callback for cell editor to update address when moving cells
     cellEditor.setCellChangeCallback((row: number, col: number) => {
       cellAddress.textContent = `${colToLetter(col)}${row + 1}`;

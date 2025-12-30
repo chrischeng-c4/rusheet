@@ -1,5 +1,7 @@
 use rusheet_core::{Cell, CellContent, CellCoord, CellFormat, CellRange, CellValue, Sheet};
+use rusheet_core::sheet::FilterState;
 use rusheet_formula::{shift_formula_rows, shift_formula_cols};
+use std::collections::HashSet;
 
 /// Type alias for boxed commands
 pub type CommandBox = Box<dyn Command>;
@@ -1096,6 +1098,121 @@ impl Command for UnmergeCellsCommand {
 
     fn description(&self) -> &str {
         "Unmerge cells"
+    }
+}
+
+/// Apply a column filter
+#[derive(Debug)]
+pub struct ApplyFilterCommand {
+    col: u32,
+    visible_values: HashSet<String>,
+    max_rows: u32,
+    previously_hidden_rows: Vec<u32>,  // For undo - rows that were hidden before this filter
+    newly_hidden_rows: Vec<u32>,       // For undo - rows hidden by this filter
+}
+
+impl ApplyFilterCommand {
+    pub fn new(col: u32, visible_values: HashSet<String>, max_rows: u32) -> Self {
+        Self {
+            col,
+            visible_values,
+            max_rows,
+            previously_hidden_rows: Vec::new(),
+            newly_hidden_rows: Vec::new(),
+        }
+    }
+}
+
+impl Command for ApplyFilterCommand {
+    fn execute(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        // Store previously hidden rows for undo
+        self.previously_hidden_rows = sheet.get_hidden_rows();
+
+        // Apply the filter
+        self.newly_hidden_rows = sheet.apply_column_filter(self.col, &self.visible_values, self.max_rows);
+
+        // Return affected cells (all cells in the newly hidden rows)
+        self.newly_hidden_rows
+            .iter()
+            .map(|&row| CellCoord::new(row, self.col))
+            .collect()
+    }
+
+    fn undo(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        // Show all rows that were hidden by this filter
+        sheet.show_rows(&self.newly_hidden_rows);
+
+        // Remove this filter from active filters
+        sheet.active_filters.retain(|f| f.col != self.col);
+
+        // Return affected cells
+        self.newly_hidden_rows
+            .iter()
+            .map(|&row| CellCoord::new(row, self.col))
+            .collect()
+    }
+
+    fn description(&self) -> &str {
+        "Apply Column Filter"
+    }
+}
+
+/// Clear a column filter or all filters
+#[derive(Debug)]
+pub struct ClearFilterCommand {
+    col: Option<u32>,  // None means clear all filters
+    saved_filters: Vec<FilterState>,
+    hidden_rows_before: Vec<u32>,
+}
+
+impl ClearFilterCommand {
+    pub fn new(col: Option<u32>) -> Self {
+        Self {
+            col,
+            saved_filters: Vec::new(),
+            hidden_rows_before: Vec::new(),
+        }
+    }
+}
+
+impl Command for ClearFilterCommand {
+    fn execute(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        // Save current state for undo
+        self.saved_filters = sheet.get_active_filters().to_vec();
+        self.hidden_rows_before = sheet.get_hidden_rows();
+
+        // Clear filter(s)
+        let unhidden_rows = match self.col {
+            Some(col) => sheet.clear_column_filter(col),
+            None => sheet.clear_all_filters(),
+        };
+
+        // Return affected cells
+        unhidden_rows
+            .iter()
+            .map(|&row| CellCoord::new(row, 0))
+            .collect()
+    }
+
+    fn undo(&mut self, sheet: &mut Sheet) -> Vec<CellCoord> {
+        // Restore filters - re-hide rows that were hidden before
+        sheet.hide_rows(&self.hidden_rows_before);
+
+        // Restore filter state
+        sheet.active_filters = self.saved_filters.clone();
+
+        // Return affected cells
+        self.hidden_rows_before
+            .iter()
+            .map(|&row| CellCoord::new(row, 0))
+            .collect()
+    }
+
+    fn description(&self) -> &str {
+        match self.col {
+            Some(_) => "Clear Column Filter",
+            None => "Clear All Filters",
+        }
     }
 }
 
