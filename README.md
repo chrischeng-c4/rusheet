@@ -58,6 +58,32 @@ rusheet.onChange((event) => {
 });
 ```
 
+### React Component
+
+```tsx
+import { RuSheet, useRuSheet } from 'rusheet/react';
+
+function App() {
+  const { ref, api } = useRuSheet();
+
+  return (
+    <RuSheet
+      ref={ref}
+      initialData={[
+        ['Name', 'Age', 'City'],
+        ['Alice', 30, 'NYC'],
+        ['Bob', 25, 'LA'],
+      ]}
+      onChange={(e) => console.log('Changed:', e)}
+      width="100%"
+      height={500}
+    />
+  );
+}
+```
+
+See [examples/react-basic.tsx](examples/react-basic.tsx) for more examples.
+
 ## Architecture
 
 ```
@@ -330,12 +356,13 @@ See [TODOS.md](TODOS.md) for the complete development roadmap.
 - [ ] CSV/XLSX import/export
 - [ ] Cross-sheet references
 - [ ] Advanced lookup functions (VLOOKUP, INDEX, MATCH)
-- [ ] React/Vue component wrappers
+- [x] React component wrapper (`rusheet/react`)
+- [ ] Vue component wrapper
 - [ ] npm/crates.io publishing
 
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines (coming soon).
+Contributions are welcome! Please read our [contributing guidelines](CONTRIBUTING.md).
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)

@@ -12,30 +12,29 @@ This document outlines all pending work, known issues, and future features for R
 
 ### Documentation & Packaging (Critical)
 
-- [ ] **README.md** - Project overview, quick start, badges
+- [x] **README.md** - Project overview, quick start, badges ✅ (2025-12-30)
   - Installation instructions (npm, cargo)
   - Basic usage examples
   - Links to documentation
-  - Screenshots/GIFs
+  - React component example
 
-- [ ] **LICENSE file** - MIT license file in repository root
-  - Currently declared in Cargo.toml but no file exists
+- [x] **LICENSE file** - MIT license file in repository root ✅ (2025-12-30)
 
-- [ ] **package.json metadata** - Complete npm package info
-  - [ ] `description` field
-  - [ ] `author` field
-  - [ ] `repository` URL
-  - [ ] `homepage` (docs URL)
-  - [ ] `bugs` (GitHub issues URL)
-  - [ ] `keywords` (spreadsheet, wasm, rust, formula, etc.)
+- [x] **package.json metadata** - Complete npm package info ✅ (2025-12-30)
+  - [x] `description` field
+  - [x] `author` field
+  - [x] `repository` URL
+  - [x] `homepage` (docs URL)
+  - [x] `bugs` (GitHub issues URL)
+  - [x] `keywords` (spreadsheet, wasm, rust, formula, etc.)
 
-- [ ] **CONTRIBUTING.md** - Contribution guidelines
+- [x] **CONTRIBUTING.md** - Contribution guidelines ✅ (2025-12-30)
   - Development setup
   - Code style
   - PR process
   - Issue templates
 
-- [ ] **CHANGELOG.md** - Release notes history
+- [ ] **CHANGELOG.md** - Release notes history (skipped - rapid development phase)
   - Follow Keep a Changelog format
   - Semantic versioning
 
@@ -51,10 +50,11 @@ This document outlines all pending work, known issues, and future features for R
   - No canvas dependency for data operations
   - Use case: Server-side formula calculation
 
-- [ ] **React Component Wrapper** - `<RuSheet />` component
-  - Props: `data`, `onChange`, `onSelectionChange`
-  - Ref API for imperative control
-  - SSR compatible (lazy load WASM)
+- [x] **React Component Wrapper** - `<RuSheet />` component ✅ (2025-12-30)
+  - Props: `initialData`, `onChange`, `onSelectionChange`, `collaboration`, etc.
+  - `RuSheetRef` API for imperative control (getCellData, setCellValue, etc.)
+  - `useRuSheet()` hook for easier ref management
+  - Example: `examples/react-basic.tsx`
 
 - [ ] **Vue Component Wrapper** - `<RuSheet />` component
   - Similar API to React wrapper
@@ -422,7 +422,7 @@ const arrayBuffer = uint8Array.buffer;
 - CSV/XLSX import/export
 - Advanced formula functions
 - Headless API
-- React/Vue wrappers
+- Vue component wrapper
 
 ---
 

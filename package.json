@@ -34,6 +34,11 @@
       "import": "./dist/rusheet.es.js",
       "require": "./dist/rusheet.umd.js",
       "types": "./dist/index.d.ts"
+    },
+    "./react": {
+      "import": "./dist/react/index.js",
+      "require": "./dist/react/index.cjs",
+      "types": "./dist/react/index.d.ts"
     }
   },
   "files": [
@@ -63,6 +68,8 @@
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.0.11",
     "@playwright/test": "^1.57.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
     "@vitest/browser": "^4.0.16",
     "@vitest/browser-playwright": "^4.0.16",
     "@vitest/coverage-v8": "^1.0.0",
@@ -79,5 +86,17 @@
   "dependencies": {
     "y-websocket": "^3.0.0",
     "yjs": "^13.6.28"
+  },
+  "peerDependencies": {
+    "react": ">=17.0.0",
+    "react-dom": ">=17.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   }
 }
