@@ -26,11 +26,8 @@ export default defineConfig({
     exclude: ['**/node_modules/**', 'e2e/**', '**/e2e/**', 'example/**'],
     pool: 'forks',
     isolate: false,
-    poolOptions: {
-      forks: {
-        singleFork: true,
-      },
-    },
+    // Vitest 4: poolOptions moved to top-level
+    singleFork: true,
     server: {
       deps: {
         inline: ['rusheet-wasm'],
