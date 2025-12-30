@@ -9,9 +9,17 @@ import type { IGridRenderer } from './types/renderer';
 import InputController from './ui/InputController';
 import CellEditor from './ui/CellEditor';
 import { PersistenceManager } from './core/PersistenceManager';
+import {
+  initCollaboration,
+  createCollaborationUI,
+  type CollaborationProvider,
+} from './collab';
 
 // Configuration: Set to true to use OffscreenCanvas worker rendering
 const USE_OFFSCREEN_CANVAS = false; // Set to true to enable worker-based rendering
+
+// Collaboration server URL (can be overridden via environment or URL params)
+const COLLAB_SERVER_URL = (import.meta.env?.VITE_COLLAB_SERVER_URL as string) || 'http://localhost:3000';
 
 /**
  * Convert column index to Excel-style letter notation
@@ -29,6 +37,51 @@ function colToLetter(col: number): string {
 }
 
 /**
+ * Get workbook ID from URL params or generate a new one
+ */
+function getWorkbookId(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('workbook');
+}
+
+/**
+ * Get user name from URL params or localStorage
+ */
+function getUserName(): string {
+  const params = new URLSearchParams(window.location.search);
+  const urlName = params.get('user');
+  if (urlName) return urlName;
+
+  const storedName = localStorage.getItem('rusheet.userName');
+  if (storedName) return storedName;
+
+  const defaultName = `User-${Math.random().toString(36).slice(2, 6)}`;
+  localStorage.setItem('rusheet.userName', defaultName);
+  return defaultName;
+}
+
+/**
+ * Initialize collaboration mode if workbook ID is present in URL
+ */
+function initCollaborationMode(): { provider: CollaborationProvider; workbookId: string } | null {
+  const workbookId = getWorkbookId();
+  if (!workbookId) {
+    console.log('[RuSheet] No workbook ID in URL, running in offline mode');
+    return null;
+  }
+
+  console.log('[RuSheet] Initializing collaboration for workbook:', workbookId);
+
+  const provider = initCollaboration({
+    serverUrl: COLLAB_SERVER_URL,
+    workbookId,
+    userName: getUserName(),
+  });
+
+  return { provider, workbookId };
+}
+
+/**
  * Main application entry point
  */
 async function main(): Promise<void> {
@@ -36,9 +89,14 @@ async function main(): Promise<void> {
     // Step 1: Initialize WASM module
     await rusheet.init();
 
-    // Step 1.5: Initialize persistence and try to load saved data
+    // Step 1.5: Initialize collaboration if workbook ID in URL
+    const collabResult = initCollaborationMode();
+    let _collabUI: ReturnType<typeof createCollaborationUI> | null = null;
+
+    // Step 1.6: Initialize persistence and try to load saved data
+    // Skip loading local data if in collaboration mode (will sync from server)
     const persistence = new PersistenceManager();
-    const hasData = persistence.load();
+    const hasData = collabResult ? false : persistence.load();
 
     // Step 2: Get DOM elements
     const canvas = document.getElementById('spreadsheet-canvas') as HTMLCanvasElement;
@@ -221,9 +279,13 @@ async function main(): Promise<void> {
       });
     }
 
-    // Save before page unload
+    // Save before page unload and cleanup collaboration
     window.addEventListener('beforeunload', () => {
       persistence.save();
+      if (collabResult && _collabUI) {
+        _collabUI.destroy();
+        collabResult.provider.disconnect();
+      }
     });
 
     // Set up autocomplete toggle
@@ -241,7 +303,70 @@ async function main(): Promise<void> {
       });
     }
 
-    // Step 9: Add test data to demonstrate functionality (only if no data was loaded)
+    // Step 9: Set up collaboration UI if in collaboration mode
+    if (collabResult) {
+      _collabUI = createCollaborationUI(collabResult.provider);
+
+      // Update share button/link
+      const shareUrl = `${window.location.origin}${window.location.pathname}?workbook=${collabResult.workbookId}`;
+      console.log('[RuSheet] Share URL:', shareUrl);
+
+      // Add share button if not exists
+      let shareBtn = document.getElementById('share-btn');
+      if (!shareBtn) {
+        shareBtn = document.createElement('button');
+        shareBtn.id = 'share-btn';
+        shareBtn.textContent = 'Copy Share Link';
+        shareBtn.style.cssText = 'margin-left: 8px; padding: 4px 8px; cursor: pointer;';
+        document.querySelector('.toolbar')?.appendChild(shareBtn);
+      }
+
+      shareBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(shareUrl).then(() => {
+          const originalText = shareBtn!.textContent;
+          shareBtn!.textContent = 'Copied!';
+          setTimeout(() => {
+            shareBtn!.textContent = originalText;
+          }, 2000);
+        });
+      });
+    } else {
+      // Add "Start Collaboration" button for offline mode
+      let startCollabBtn = document.getElementById('start-collab-btn');
+      if (!startCollabBtn) {
+        startCollabBtn = document.createElement('button');
+        startCollabBtn.id = 'start-collab-btn';
+        startCollabBtn.textContent = 'Start Collaboration';
+        startCollabBtn.style.cssText = 'margin-left: 8px; padding: 4px 8px; cursor: pointer;';
+        document.querySelector('.toolbar')?.appendChild(startCollabBtn);
+      }
+
+      startCollabBtn.addEventListener('click', async () => {
+        try {
+          // Create a new workbook on the server
+          const response = await fetch(`${COLLAB_SERVER_URL}/api/workbooks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: 'Untitled Workbook' }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to create workbook: ${response.statusText}`);
+          }
+
+          const workbook = await response.json();
+
+          // Redirect to collaboration mode with the new workbook ID
+          const collabUrl = `${window.location.origin}${window.location.pathname}?workbook=${workbook.id}`;
+          window.location.href = collabUrl;
+        } catch (error) {
+          console.error('[RuSheet] Failed to start collaboration:', error);
+          alert('Failed to start collaboration. Is the server running?');
+        }
+      });
+    }
+
+    // Step 10: Add test data to demonstrate functionality (only if no data was loaded)
     if (!hasData) {
       // Add header row
       rusheet.setCellValue(0, 0, 'Product', 'api');

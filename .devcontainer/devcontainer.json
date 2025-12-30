@@ -1,0 +1,41 @@
+{
+  "name": "RuSheet Dev",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "latest",
+      "profile": "default"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    },
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "configureZshAsDefaultShell": true
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "serayuzgur.crates",
+        "vadimcn.vscode-lldb",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint"
+      ],
+      "settings": {
+        "rust-analyzer.cargo.features": "all",
+        "editor.formatOnSave": true
+      }
+    }
+  },
+  "forwardPorts": [3000, 5173, 5432],
+  "postCreateCommand": "rustup target add wasm32-unknown-unknown && cargo install wasm-pack just && npm install",
+  "remoteEnv": {
+    "DATABASE_URL": "postgres://postgres:postgres@postgres:5432/rusheet",
+    "RUST_LOG": "rusheet_server=debug,tower_http=debug"
+  }
+}

@@ -83,3 +83,37 @@ docs-build:
 
 docs-preview:
     pnpm docs:preview
+
+# Server commands
+# Start PostgreSQL (for local development without devcontainer)
+db-up:
+    docker compose up -d postgres
+
+# Stop PostgreSQL
+db-down:
+    docker compose down
+
+# Build the server
+build-server:
+    cargo build --package rusheet-server
+
+# Run the server (requires PostgreSQL)
+server:
+    cargo run --package rusheet-server
+
+# Run server in watch mode (requires cargo-watch)
+server-watch:
+    cargo watch -x "run --package rusheet-server"
+
+# Run server tests
+test-server:
+    cargo test --package rusheet-server
+
+# Full dev environment (starts DB, builds WASM, runs frontend + server in parallel)
+dev-full: build-wasm
+    @echo "Starting PostgreSQL..."
+    docker compose up -d postgres
+    @echo "Waiting for PostgreSQL..."
+    sleep 3
+    @echo "Starting server and frontend in parallel..."
+    (cargo run --package rusheet-server &) && pnpm run dev

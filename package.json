@@ -51,5 +51,9 @@
     "vite-plugin-wasm": "^3.3.0",
     "vitepress": "^1.6.4",
     "vitest": "^4.0.16"
+  },
+  "dependencies": {
+    "y-websocket": "^3.0.0",
+    "yjs": "^13.6.28"
   }
 }

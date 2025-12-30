@@ -4,6 +4,7 @@ members = [
     "crates/rusheet-formula",
     "crates/rusheet-wasm",
     "crates/rusheet-history",
+    "crates/rusheet-server",
 ]
 resolver = "2"
 
