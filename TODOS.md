@@ -8,6 +8,85 @@ This document outlines all pending work, known issues, and future features for R
 
 ---
 
+## Open-Source Readiness Checklist
+
+### Documentation & Packaging (Critical)
+
+- [ ] **README.md** - Project overview, quick start, badges
+  - Installation instructions (npm, cargo)
+  - Basic usage examples
+  - Links to documentation
+  - Screenshots/GIFs
+
+- [ ] **LICENSE file** - MIT license file in repository root
+  - Currently declared in Cargo.toml but no file exists
+
+- [ ] **package.json metadata** - Complete npm package info
+  - [ ] `description` field
+  - [ ] `author` field
+  - [ ] `repository` URL
+  - [ ] `homepage` (docs URL)
+  - [ ] `bugs` (GitHub issues URL)
+  - [ ] `keywords` (spreadsheet, wasm, rust, formula, etc.)
+
+- [ ] **CONTRIBUTING.md** - Contribution guidelines
+  - Development setup
+  - Code style
+  - PR process
+  - Issue templates
+
+- [ ] **CHANGELOG.md** - Release notes history
+  - Follow Keep a Changelog format
+  - Semantic versioning
+
+- [ ] **GitHub Templates**
+  - [ ] ISSUE_TEMPLATE (bug report, feature request)
+  - [ ] PULL_REQUEST_TEMPLATE
+  - [ ] CODE_OF_CONDUCT.md
+
+### SDK & Integration
+
+- [ ] **Headless API** - Server-side usage without DOM
+  - Node.js compatible WASM loading
+  - No canvas dependency for data operations
+  - Use case: Server-side formula calculation
+
+- [ ] **React Component Wrapper** - `<RuSheet />` component
+  - Props: `data`, `onChange`, `onSelectionChange`
+  - Ref API for imperative control
+  - SSR compatible (lazy load WASM)
+
+- [ ] **Vue Component Wrapper** - `<RuSheet />` component
+  - Similar API to React wrapper
+
+- [ ] **REST API Client SDK** - TypeScript client for rusheet-server
+  - Workbook CRUD operations
+  - WebSocket connection helper
+  - Type-safe API calls
+
+- [ ] **Storybook / Playground**
+  - Interactive component demos
+  - API exploration
+
+- [ ] **CodeSandbox / StackBlitz Examples**
+  - One-click runnable examples
+  - Different framework integrations
+
+### Package Publishing
+
+- [ ] **Publish to npm** - `rusheet` package
+  - Build pipeline for ESM/CJS/UMD
+  - Type definitions included
+  - README on npm page
+
+- [ ] **Publish to crates.io**
+  - [ ] `rusheet-core`
+  - [ ] `rusheet-formula`
+  - [ ] `rusheet-history`
+  - [ ] `rusheet-wasm` (if useful standalone)
+
+---
+
 ## Current Priority Queue
 
 ### P0: Critical (Blocks Integration)
@@ -24,6 +103,14 @@ This document outlines all pending work, known issues, and future features for R
   - Formula references auto-update (respects $absolute refs)
   - Full undo/redo support with history commands
   - TypeScript events: `onRowsInsert`, `onRowsDelete`, `onColsInsert`, `onColsDelete`
+
+- [x] **Real-time Collaboration Server** ✅ (2025-12-30)
+  - Rust backend with Axum (rusheet-server crate)
+  - REST API for workbook CRUD
+  - WebSocket endpoint with yrs (Rust Yjs)
+  - PostgreSQL persistence
+  - Frontend Yjs integration
+  - User presence and cursor awareness
 
 - [ ] **Structured Error Handling** - API returns strings, not error objects
   - Create `RuSheetError { code, message, affectedCells }`
@@ -43,6 +130,11 @@ This document outlines all pending work, known issues, and future features for R
 - [ ] **Cross-Sheet References** - `Sheet2!A1` syntax parsed but not evaluated
   - Parser supports `SheetRef`, evaluator returns `InvalidReference`
   - Implement in `rusheet-formula/src/evaluator.rs`
+
+- [ ] **XLSX Import/Export** - Excel compatibility
+  - Use `calamine` (read) + `rust_xlsxwriter` (write)
+  - Consider WASM bundle size tradeoff
+  - Critical for enterprise adoption
 
 ### P2: Medium Priority (Feature Completeness)
 
@@ -67,27 +159,126 @@ This document outlines all pending work, known issues, and future features for R
   - Merge/unmerge cell ranges
   - Merged cell rendering
 
-### P3: Low Priority (Nice to Have)
-
-- [ ] **XLSX Import/Export**
-  - Use `calamine` (read) + `rust_xlsxwriter` (write)
-  - Consider WASM bundle size tradeoff
-
-- [ ] **Cell Comments/Notes**
-  - Add/edit/delete comments
-  - Comment indicators in cells
+- [ ] **Named Ranges**
+  - Create/edit named ranges
+  - Use in formulas
 
 - [ ] **Find & Replace**
   - Search across sheets
   - Regex support
 
-- [ ] **Named Ranges**
-  - Create/edit named ranges
-  - Use in formulas
+### P3: Low Priority (Nice to Have)
+
+- [ ] **Cell Comments/Notes**
+  - Add/edit/delete comments
+  - Comment indicators in cells
 
 - [ ] **Charts** (spec exists, not implemented)
   - Basic chart types (bar, line, pie)
   - Chart data range binding
+  - Consider Chart.js or D3 integration
+
+- [ ] **Print/PDF Export**
+  - Print preview
+  - PDF generation
+
+- [ ] **Keyboard Shortcuts Documentation**
+  - Comprehensive shortcut list
+  - Customizable shortcuts
+
+---
+
+## Security & Authentication (Collaboration)
+
+### Authentication
+
+- [ ] **User Authentication**
+  - JWT token-based auth
+  - OAuth2 providers (Google, GitHub)
+  - Session management
+
+- [ ] **Workbook Permissions**
+  - Owner, Editor, Viewer roles
+  - Per-workbook access control
+  - Public/private workbooks
+
+- [ ] **Share Links**
+  - Generate shareable URLs
+  - Link expiration
+  - Password protection
+
+### Security
+
+- [ ] **Rate Limiting**
+  - API rate limits
+  - WebSocket connection limits
+
+- [ ] **Input Sanitization**
+  - Prevent XSS in cell content
+  - Formula injection protection
+
+- [ ] **Audit Logging**
+  - Track changes per user
+  - Access logs
+
+---
+
+## Accessibility & i18n
+
+### Accessibility (a11y)
+
+- [ ] **Keyboard Navigation**
+  - Full keyboard support documented
+  - Focus indicators
+  - Skip links
+
+- [ ] **Screen Reader Support**
+  - ARIA labels
+  - Live regions for updates
+  - Accessible grid pattern
+
+- [ ] **High Contrast Mode**
+  - Support system preferences
+  - Custom high contrast theme
+
+### Internationalization (i18n)
+
+- [ ] **Locale Support**
+  - Number formatting (decimal separator)
+  - Date formatting
+  - Currency formatting
+
+- [ ] **RTL Support**
+  - Right-to-left text direction
+  - Mirrored UI
+
+- [ ] **Translation Framework**
+  - Externalized strings
+  - Translation files
+
+---
+
+## Developer Experience
+
+### Tooling
+
+- [ ] **CI/CD Pipeline Improvements**
+  - Automated releases
+  - npm/crates.io publishing
+  - Changelog generation
+
+- [ ] **Pre-commit Hooks**
+  - Lint on commit
+  - Format on commit
+  - Type check
+
+### Documentation Site (VitePress) ✅
+
+- [x] API reference
+- [x] Getting started guide
+- [x] Architecture overview
+- [ ] More examples and tutorials
+- [ ] Versioned docs
 
 ---
 
@@ -171,6 +362,16 @@ const arrayBuffer = uint8Array.buffer;
 - Nom-based parser with 53 tests
 - 24 built-in functions (SUM, IF, CONCATENATE, etc.)
 
+### Phase 5: Event System & Row/Col Operations ✅
+- Complete event/callback system
+- Row/column insert/delete with undo/redo
+
+### Phase 6: Collaboration Server ✅
+- rusheet-server crate with Axum
+- Real-time sync with Yjs/yrs
+- PostgreSQL persistence
+- DevContainer setup
+
 ---
 
 ## API Inventory
@@ -200,7 +401,7 @@ const arrayBuffer = uint8Array.buffer;
 **Serialization:**
 - `serialize()`, `deserialize(json)`
 
-**Row/Column Operations:** ✅ (New)
+**Row/Column Operations:** ✅
 - `insertRows(atRow, count)`, `deleteRows(atRow, count)`
 - `insertCols(atCol, count)`, `deleteCols(atCol, count)`
 
@@ -210,10 +411,18 @@ const arrayBuffer = uint8Array.buffer;
 - `onUndo`, `onRedo`
 - `onRowsInsert`, `onRowsDelete`, `onColsInsert`, `onColsDelete`
 
-### Missing (See P0-P3 Above)
+**Collaboration Server API:** ✅
+- `GET/POST /api/workbooks` - List/create workbooks
+- `GET/PUT/DELETE /api/workbooks/{id}` - Workbook CRUD
+- `GET/PUT /api/workbooks/{id}/content` - Content storage
+- `WS /ws/{workbook_id}` - Real-time collaboration
+
+### Missing (See Priority Queue Above)
 
 - CSV/XLSX import/export
 - Advanced formula functions
+- Headless API
+- React/Vue wrappers
 
 ---
 
@@ -231,6 +440,17 @@ rusheet-wasm (WASM bindings)
   ├── rusheet-core (cells, sheets, formatting)
   ├── rusheet-formula (parser, evaluator)
   └── rusheet-history (undo/redo commands)
+
+rusheet-server (Collaboration backend)
+  ├── rusheet-core
+  ├── axum (HTTP/WebSocket)
+  ├── yrs (CRDT)
+  └── sqlx (PostgreSQL)
+
+Frontend
+  ├── rusheet-wasm (via pkg/)
+  ├── yjs + y-websocket (collaboration)
+  └── Canvas rendering
 ```
 
 ### Testing Principles
