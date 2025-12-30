@@ -12,9 +12,11 @@ This document outlines all pending work, known issues, and future features for R
 
 ### P0: Critical (Blocks Integration)
 
-- [ ] **Implement Event/Callback System** - External systems cannot subscribe to cell changes
-  - Required for: React integration, real-time sync, undo UI feedback
-  - Suggested API: `engine.on('cellChanged', callback)`
+- [x] **Implement Event/Callback System** ✅ (2025-12-30)
+  - Added: `onFormatChange`, `onSheetAdd/Delete/Rename`, `onActiveSheetChange`, `onUndo/Redo`
+  - Integrated `rusheet` API into main.ts and CellEditor
+  - Library export via `src/index.ts`
+  - 11 unit tests added
 
 - [ ] **Implement Row/Column Insert/Delete** - Basic spreadsheet operations missing
   - `insertRows(atRow, count)`, `deleteRows(atRow, count)`
@@ -138,7 +140,7 @@ const arrayBuffer = uint8Array.buffer;
 | Type | Count | Status |
 |------|-------|--------|
 | Rust Tests | 331 | ✅ 100% passing |
-| TS Unit Tests | ~32 | ✅ Passing |
+| TS Unit Tests | 62 | ✅ Passing |
 | TS Integration | ~88 | ⚠️ WASM blocked |
 | E2E (Playwright) | 2 files | ✅ Running |
 
@@ -196,9 +198,13 @@ const arrayBuffer = uint8Array.buffer;
 **Serialization:**
 - `serialize()`, `deserialize(json)`
 
+**Events:** ✅ (New)
+- `onChange`, `onSelectionChange`, `onCellEdit`
+- `onFormatChange`, `onSheetAdd/Delete/Rename`, `onActiveSheetChange`
+- `onUndo`, `onRedo`
+
 ### Missing (See P0-P3 Above)
 
-- Event subscription system
 - Row/Column insert/delete
 - CSV/XLSX import/export
 - Advanced formula functions
