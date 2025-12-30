@@ -1,6 +1,30 @@
 {
   "name": "rusheet",
   "version": "0.1.0",
+  "description": "High-performance spreadsheet engine built with Rust and WebAssembly",
+  "author": "RuSheet Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chrischeng-c4/rusheet.git"
+  },
+  "homepage": "https://github.com/chrischeng-c4/rusheet#readme",
+  "bugs": {
+    "url": "https://github.com/chrischeng-c4/rusheet/issues"
+  },
+  "keywords": [
+    "spreadsheet",
+    "excel",
+    "wasm",
+    "webassembly",
+    "rust",
+    "formula",
+    "grid",
+    "table",
+    "data",
+    "collaboration",
+    "real-time"
+  ],
   "type": "module",
   "main": "./dist/rusheet.umd.js",
   "module": "./dist/rusheet.es.js",
