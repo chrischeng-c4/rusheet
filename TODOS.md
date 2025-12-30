@@ -18,10 +18,12 @@ This document outlines all pending work, known issues, and future features for R
   - Library export via `src/index.ts`
   - 11 unit tests added
 
-- [ ] **Implement Row/Column Insert/Delete** - Basic spreadsheet operations missing
+- [x] **Implement Row/Column Insert/Delete** ✅ (2025-12-30)
   - `insertRows(atRow, count)`, `deleteRows(atRow, count)`
   - `insertCols(atCol, count)`, `deleteCols(atCol, count)`
-  - Must update formula references when rows/cols shift
+  - Formula references auto-update (respects $absolute refs)
+  - Full undo/redo support with history commands
+  - TypeScript events: `onRowsInsert`, `onRowsDelete`, `onColsInsert`, `onColsDelete`
 
 - [ ] **Structured Error Handling** - API returns strings, not error objects
   - Create `RuSheetError { code, message, affectedCells }`
@@ -139,7 +141,7 @@ const arrayBuffer = uint8Array.buffer;
 
 | Type | Count | Status |
 |------|-------|--------|
-| Rust Tests | 331 | ✅ 100% passing |
+| Rust Tests | 394 | ✅ 100% passing |
 | TS Unit Tests | 62 | ✅ Passing |
 | TS Integration | ~88 | ⚠️ WASM blocked |
 | E2E (Playwright) | 2 files | ✅ Running |
@@ -198,14 +200,18 @@ const arrayBuffer = uint8Array.buffer;
 **Serialization:**
 - `serialize()`, `deserialize(json)`
 
-**Events:** ✅ (New)
+**Row/Column Operations:** ✅ (New)
+- `insertRows(atRow, count)`, `deleteRows(atRow, count)`
+- `insertCols(atCol, count)`, `deleteCols(atCol, count)`
+
+**Events:** ✅
 - `onChange`, `onSelectionChange`, `onCellEdit`
 - `onFormatChange`, `onSheetAdd/Delete/Rename`, `onActiveSheetChange`
 - `onUndo`, `onRedo`
+- `onRowsInsert`, `onRowsDelete`, `onColsInsert`, `onColsDelete`
 
 ### Missing (See P0-P3 Above)
 
-- Row/Column insert/delete
 - CSV/XLSX import/export
 - Advanced formula functions
 
