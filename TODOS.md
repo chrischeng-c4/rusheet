@@ -1,6 +1,6 @@
 # RuSheet Development Roadmap
 
-**Last Updated:** 2025-12-30
+**Last Updated:** 2025-12-31
 
 This document outlines all pending work, known issues, and future features for RuSheet.
 
@@ -51,12 +51,12 @@ This document outlines all pending work, known issues, and future features for R
 | PDF 匯出 | P3 | ❌ |
 
 ### 協作功能
-| 缺少功能 | 優先級 |
-|----------|--------|
-| 游標追蹤（顯示其他人位置）| P1 |
-| 評論系統 | P2 |
-| 版本歷史 | P2 |
-| 權限控制（查看/編輯）| P2 |
+| 缺少功能 | 優先級 | 狀態 |
+|----------|--------|------|
+| 游標追蹤（顯示其他人位置）| P1 | ✅ 已完成 |
+| 評論系統 | P2 | ❌ |
+| 版本歷史 | P2 | ❌ |
+| 權限控制（查看/編輯）| P2 | ❌ |
 
 ---
 
@@ -204,9 +204,10 @@ This document outlines all pending work, known issues, and future features for R
   - 支援多工作表選擇、範圍匯出
 
 #### 協作功能
-- [ ] **Cursor Tracking** 🔥
+- [x] **Cursor Tracking** ✅ (2025-12-31)
   - 顯示其他協作者的游標位置
-  - 用戶顏色標識
+  - 用戶顏色標識 + 名稱標籤
+  - 支援合併儲存格
 
 ### P2: Medium Priority (Feature Completeness)
 

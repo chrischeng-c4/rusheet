@@ -30,6 +30,15 @@ export class RenderController implements IGridRenderer {
   private viewportSize: Size = { width: 0, height: 0 };
   private isReady = false;
   private options: RenderControllerOptions;
+  // Remote cursors are stored but rendering happens in main thread GridRenderer
+  // This is kept for API compatibility - worker rendering doesn't use this yet
+  private _remoteCursors: Array<{
+    id: string;
+    name: string;
+    color: string;
+    row: number;
+    col: number;
+  }> = [];
 
   constructor(canvas: HTMLCanvasElement, options: RenderControllerOptions = {}) {
     this.canvas = canvas;
@@ -179,6 +188,18 @@ export class RenderController implements IGridRenderer {
 
   public getActiveCell(): CellPosition {
     return { ...this.activeCell };
+  }
+
+  public setRemoteCursors(cursors: Array<{
+    id: string;
+    name: string;
+    color: string;
+    row: number;
+    col: number;
+  }>): void {
+    this._remoteCursors = cursors;
+    // Store locally for now - can be forwarded to worker later if needed
+    this.render();
   }
 
   public render(): void {

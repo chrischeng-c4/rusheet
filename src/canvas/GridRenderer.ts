@@ -24,6 +24,13 @@ export default class GridRenderer {
   private scrollOffset: Point = { x: 0, y: 0 };
   private viewportSize: Size = { width: 0, height: 0 };
   private activeCell: CellPosition = { row: 0, col: 0 };
+  private remoteCursors: Array<{
+    id: string;
+    name: string;
+    color: string;
+    row: number;
+    col: number;
+  }> = [];
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -64,6 +71,27 @@ export default class GridRenderer {
    */
   public getActiveCell(): CellPosition {
     return { ...this.activeCell };
+  }
+
+  /**
+   * Set remote cursors to display
+   */
+  public setRemoteCursors(cursors: Array<{
+    id: string;
+    name: string;
+    color: string;
+    row: number;
+    col: number;
+  }>): void {
+    this.remoteCursors = cursors;
+    this.requestRender();
+  }
+
+  /**
+   * Request a render on next animation frame
+   */
+  private requestRender(): void {
+    requestAnimationFrame(() => this.render());
   }
 
   /**
@@ -210,6 +238,9 @@ export default class GridRenderer {
 
     // Layer 5: Selection border
     this.renderSelection();
+
+    // Layer 6: Remote cursors
+    this.renderRemoteCursors();
   }
 
   /**
@@ -537,6 +568,74 @@ export default class GridRenderer {
     ctx.strokeStyle = theme.activeCellBorder;
     ctx.lineWidth = theme.activeCellBorderWidth;
     ctx.strokeRect(pos.x, pos.y, selectionWidth, selectionHeight);
+  }
+
+  /**
+   * Render remote cursors from other users
+   */
+  private renderRemoteCursors(): void {
+    const ctx = this.ctx;
+    const range = this.calculateVisibleRange();
+
+    for (const cursor of this.remoteCursors) {
+      const { row, col, name, color } = cursor;
+
+      // Check if cursor is in visible range
+      if (row < range.startRow || row > range.endRow ||
+          col < range.startCol || col > range.endCol) {
+        continue;
+      }
+
+      // Check if the cursor is on a merged cell
+      const mergeInfo = WasmBridge.getMergeInfo(row, col);
+
+      let cursorRow = row;
+      let cursorCol = col;
+      let cursorWidth: number;
+      let cursorHeight: number;
+
+      if (mergeInfo) {
+        // Cursor covers the entire merged range
+        cursorRow = mergeInfo.masterRow;
+        cursorCol = mergeInfo.masterCol;
+        cursorWidth = this.getMergedWidth(mergeInfo.masterCol, mergeInfo.colSpan);
+        cursorHeight = this.getMergedHeight(mergeInfo.masterRow, mergeInfo.rowSpan);
+      } else {
+        // Regular cell cursor
+        cursorWidth = WasmBridge.getColWidth(col);
+        cursorHeight = WasmBridge.getRowHeight(row);
+      }
+
+      const pos = this.gridToScreen(cursorRow, cursorCol);
+
+      // Draw colored border around the cell
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(pos.x, pos.y, cursorWidth, cursorHeight);
+
+      // Draw user name label
+      const labelPadding = 4;
+      const labelHeight = 18;
+
+      // Measure text to determine label width
+      ctx.font = '11px sans-serif';
+      const textMetrics = ctx.measureText(name);
+      const labelWidth = textMetrics.width + labelPadding * 2;
+
+      // Position label above the cell, slightly offset to the left
+      const labelX = pos.x;
+      const labelY = pos.y - labelHeight - 2;
+
+      // Draw label background
+      ctx.fillStyle = color;
+      ctx.fillRect(labelX, labelY, labelWidth, labelHeight);
+
+      // Draw label text in white
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(name, labelX + labelPadding, labelY + 2);
+    }
   }
 
   /**

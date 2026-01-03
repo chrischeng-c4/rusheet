@@ -5,7 +5,7 @@ import './styles/main.css';
 import { rusheet } from './core/RusheetAPI';
 import GridRenderer from './canvas/GridRenderer';
 import { RenderController, isOffscreenCanvasSupported } from './worker';
-import type { IGridRenderer } from './types/renderer';
+import type { IGridRenderer, RemoteCursor } from './types/renderer';
 import InputController from './ui/InputController';
 import CellEditor from './ui/CellEditor';
 import { PersistenceManager } from './core/PersistenceManager';
@@ -311,6 +311,28 @@ async function main(): Promise<void> {
     // Step 9: Set up collaboration UI if in collaboration mode
     if (collabResult) {
       _collabUI = createCollaborationUI(collabResult.provider);
+
+      // Set up remote cursor updates
+      const updateRemoteCursors = () => {
+        const users = collabResult.provider.getUsers();
+        const remoteCursors: RemoteCursor[] = users
+          .filter(user => user.cursor !== undefined)
+          .map(user => ({
+            id: user.id,
+            name: user.name,
+            color: user.color,
+            row: user.cursor!.row,
+            col: user.cursor!.col,
+          }));
+        renderer.setRemoteCursors(remoteCursors);
+        renderer.render();
+      };
+
+      // Listen for user changes and update remote cursors
+      collabResult.provider.onUsersChange(updateRemoteCursors);
+
+      // Initial update
+      updateRemoteCursors();
 
       // Update share button/link
       const shareUrl = `${window.location.origin}${window.location.pathname}?workbook=${collabResult.workbookId}`;

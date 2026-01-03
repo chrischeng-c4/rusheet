@@ -14,6 +14,14 @@ export interface CellPosition {
   col: number;
 }
 
+export interface RemoteCursor {
+  id: string;
+  name: string;
+  color: string;
+  row: number;
+  col: number;
+}
+
 export interface IGridRenderer {
   /**
    * Update viewport size based on canvas dimensions
@@ -50,6 +58,11 @@ export interface IGridRenderer {
    * Returns the column index if on a filter button, -1 otherwise
    */
   isOnFilterButton(screenX: number, screenY: number): number;
+
+  /**
+   * Set remote cursors to display
+   */
+  setRemoteCursors(cursors: RemoteCursor[]): void;
 
   /**
    * Trigger a render
