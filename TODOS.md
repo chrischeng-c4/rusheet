@@ -1,6 +1,6 @@
 # RuSheet Development Roadmap
 
-**Last Updated:** 2025-12-31
+**Last Updated:** 2026-01-04
 
 This document outlines all pending work, known issues, and future features for RuSheet.
 
@@ -152,9 +152,10 @@ This document outlines all pending work, known issues, and future features for R
   - TypeScript 層用 papaparse 實現
   - 支援自訂分隔符、範圍匯出、位移匯入
 
-- [ ] **Structured Error Handling**
-  - Create `RuSheetError { code, message, affectedCells }`
-  - Consistent error codes across WASM boundary
+- [x] **Structured Error Handling** ✅ (2026-01-04)
+  - Created `RuSheetError` enum in Rust core.
+  - Implemented `JsRuSheetError` in WASM bridge for structured error return.
+  - Updated `RusheetAPI.ts` to handle and log errors with codes.
 
 ### P1: High Priority (核心功能補齊)
 
@@ -292,6 +293,11 @@ This document outlines all pending work, known issues, and future features for R
   - Updated Vitest 4 config (poolOptions → singleFork)
   - 121 unit tests + 131 integration tests passing
 
+- [x] **Fix Test Isolation and Mocking** ✅ (2026-01-04)
+  - Enabled `isolate: true` in `vite.config.ts` to prevent state leakage between tests.
+  - Refactored `merging.test.ts`, `RusheetAPI.test.ts`, and `filtering.test.ts` to use `vi.hoisted` for shared mock state.
+  - Resolved flaky integration tests caused by module caching.
+
 ---
 
 ## Security & Authentication (Collaboration)
@@ -394,9 +400,9 @@ This document outlines all pending work, known issues, and future features for R
 
 | Type | Count | Status |
 |------|-------|--------|
-| Rust Tests | 394 | ✅ 100% passing |
+| Rust Tests | 422 | ✅ 100% passing |
 | TS Unit Tests | 141 | ✅ Passing |
-| TS Integration | 131 | ✅ Passing (1 flaky) |
+| TS Integration | 132 | ✅ Passing |
 | E2E (Playwright) | 2 files | ✅ Running |
 
 ### WASM Loading in Node.js Environment ✅ RESOLVED

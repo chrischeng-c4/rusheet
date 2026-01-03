@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::sheet::Sheet;
+use crate::error::RusheetError;
 
 /// Metadata about the workbook
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -102,11 +103,20 @@ impl Workbook {
     }
 
     /// Add a new sheet with the given name
-    pub fn add_sheet(&mut self, name: impl Into<String>) -> usize {
+    pub fn add_sheet(&mut self, name: impl Into<String>) -> Result<usize, RusheetError> {
         let name = name.into();
+        
+        if name.trim().is_empty() {
+             return Err(RusheetError::InvalidSheetName("Name cannot be empty".to_string()));
+        }
+
+        if self.sheets.iter().any(|s| s.name == name) {
+            return Err(RusheetError::SheetNameExists(name));
+        }
+
         let index = self.sheets.len();
         self.sheets.push(Sheet::new(name));
-        index
+        Ok(index)
     }
 
     /// Add a new sheet with an auto-generated name (Sheet2, Sheet3, etc.)
@@ -115,21 +125,21 @@ impl Workbook {
         loop {
             let name = format!("Sheet{}", num);
             if !self.sheets.iter().any(|s| s.name == name) {
-                return self.add_sheet(name);
+                // We know this is safe because we just checked existence
+                return self.add_sheet(name).unwrap();
             }
             num += 1;
         }
     }
 
     /// Remove a sheet by index
-    pub fn remove_sheet(&mut self, index: usize) -> Option<Sheet> {
+    pub fn remove_sheet(&mut self, index: usize) -> Result<Sheet, RusheetError> {
         if self.sheets.len() <= 1 {
-            // Cannot remove the last sheet
-            return None;
+            return Err(RusheetError::CannotDeleteLastSheet);
         }
 
         if index >= self.sheets.len() {
-            return None;
+            return Err(RusheetError::SheetNotFound(index));
         }
 
         let sheet = self.sheets.remove(index);
@@ -141,25 +151,29 @@ impl Workbook {
             self.active_sheet_index -= 1;
         }
 
-        Some(sheet)
+        Ok(sheet)
     }
 
     /// Rename a sheet
-    pub fn rename_sheet(&mut self, index: usize, new_name: impl Into<String>) -> bool {
+    pub fn rename_sheet(&mut self, index: usize, new_name: impl Into<String>) -> Result<(), RusheetError> {
         let new_name = new_name.into();
+
+        if new_name.trim().is_empty() {
+            return Err(RusheetError::InvalidSheetName("Name cannot be empty".to_string()));
+        }
 
         // Check if name is already used by another sheet
         for (i, sheet) in self.sheets.iter().enumerate() {
             if i != index && sheet.name == new_name {
-                return false;
+                return Err(RusheetError::SheetNameExists(new_name));
             }
         }
 
         if let Some(sheet) = self.sheets.get_mut(index) {
             sheet.name = new_name;
-            true
+            Ok(())
         } else {
-            false
+            Err(RusheetError::SheetNotFound(index))
         }
     }
 
@@ -250,7 +264,7 @@ mod tests {
         let mut wb = Workbook::new("Test");
 
         // Add sheets
-        let idx = wb.add_sheet("Sheet2");
+        let idx = wb.add_sheet("Sheet2").unwrap();
         assert_eq!(idx, 1);
         assert_eq!(wb.sheet_count(), 2);
 
@@ -258,20 +272,20 @@ mod tests {
         assert_eq!(wb.sheets[idx].name, "Sheet3");
 
         // Remove sheet
-        wb.remove_sheet(1);
+        wb.remove_sheet(1).unwrap();
         assert_eq!(wb.sheet_count(), 2);
 
         // Cannot remove last sheet
-        wb.remove_sheet(0);
-        wb.remove_sheet(0);
+        assert!(wb.remove_sheet(0).is_ok());
+        assert!(wb.remove_sheet(0).is_err()); // Only 1 left now
         assert_eq!(wb.sheet_count(), 1);
     }
 
     #[test]
     fn test_sheet_navigation() {
         let mut wb = Workbook::new("Test");
-        wb.add_sheet("Sheet2");
-        wb.add_sheet("Sheet3");
+        wb.add_sheet("Sheet2").unwrap();
+        wb.add_sheet("Sheet3").unwrap();
 
         assert_eq!(wb.active_sheet_index, 0);
 
@@ -285,19 +299,19 @@ mod tests {
     #[test]
     fn test_rename_sheet() {
         let mut wb = Workbook::new("Test");
-        wb.add_sheet("Sheet2");
+        wb.add_sheet("Sheet2").unwrap();
 
-        assert!(wb.rename_sheet(0, "Main"));
+        assert!(wb.rename_sheet(0, "Main").is_ok());
         assert_eq!(wb.sheets[0].name, "Main");
 
         // Cannot rename to existing name
-        assert!(!wb.rename_sheet(1, "Main"));
+        assert!(wb.rename_sheet(1, "Main").is_err());
     }
 
     #[test]
     fn test_serialization() {
         let mut wb = Workbook::new("Test");
-        wb.add_sheet("Sheet2");
+        wb.add_sheet("Sheet2").unwrap();
 
         let json = wb.to_json().unwrap();
         let wb2 = Workbook::from_json(&json).unwrap();

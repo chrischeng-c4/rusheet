@@ -25,7 +25,7 @@ export default defineConfig({
     include: ['src/**/*.{test,spec}.ts', 'src/**/*.integration.test.ts'],
     exclude: ['**/node_modules/**', 'e2e/**', '**/e2e/**', 'example/**'],
     pool: 'forks',
-    isolate: false,
+    isolate: true,
     // Vitest 4: poolOptions moved to top-level
     singleFork: true,
     server: {

@@ -1,3 +1,8 @@
+export interface RusheetError {
+  code: string;
+  message: string;
+}
+
 export interface CellData {
   value: string | null;
   displayValue: string;

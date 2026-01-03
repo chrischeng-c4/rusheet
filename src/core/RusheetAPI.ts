@@ -632,22 +632,32 @@ export class RusheetAPI {
 
   renameSheet(index: number, newName: string, source: EventSource = 'api'): boolean {
     const oldName = this.sheetNames[index] ?? '';
-    const success = WasmBridge.renameSheet(index, newName);
-    if (success) {
-      this.sheetNames = WasmBridge.getSheetNames();
-      emitter.emit<SheetRenameEvent>('sheetRename', { index, oldName, newName, source });
+    try {
+      const success = WasmBridge.renameSheet(index, newName);
+      if (success) {
+        this.sheetNames = WasmBridge.getSheetNames();
+        emitter.emit<SheetRenameEvent>('sheetRename', { index, oldName, newName, source });
+      }
+      return success;
+    } catch (e: any) {
+      console.warn(`Rename sheet failed: ${e.message || e}`);
+      return false;
     }
-    return success;
   }
 
   deleteSheet(index: number, source: EventSource = 'api'): boolean {
     const name = this.sheetNames[index] ?? '';
-    const success = WasmBridge.deleteSheet(index);
-    if (success) {
-      this.sheetNames = WasmBridge.getSheetNames();
-      emitter.emit<SheetDeleteEvent>('sheetDelete', { index, name, source });
+    try {
+      const success = WasmBridge.deleteSheet(index);
+      if (success) {
+        this.sheetNames = WasmBridge.getSheetNames();
+        emitter.emit<SheetDeleteEvent>('sheetDelete', { index, name, source });
+      }
+      return success;
+    } catch (e: any) {
+      console.warn(`Delete sheet failed: ${e.message || e}`);
+      return false;
     }
-    return success;
   }
 
   // Row/Col sizing (pass through)

@@ -1,12 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { RusheetAPI } from '../RusheetAPI';
+
+// Use vi.hoisted to share state between mock and tests
+const mockState = vi.hoisted(() => ({
+  cells: new Map<string, { value: string; displayValue: string }>(),
+  merges: [] as Array<{ startRow: number; startCol: number; endRow: number; endCol: number }>,
+}));
 
 // Mock WasmBridge for unit tests
 vi.mock('../WasmBridge', () => {
-  const mockCells: Map<string, { value: string; displayValue: string }> = new Map();
-  const mockMerges: Array<{ startRow: number; startCol: number; endRow: number; endCol: number }> = [];
-
   const isCellInMerge = (row: number, col: number) => {
-    return mockMerges.find(m =>
+    return mockState.merges.find(m =>
       row >= m.startRow && row <= m.endRow &&
       col >= m.startCol && col <= m.endCol
     );
@@ -15,12 +19,12 @@ vi.mock('../WasmBridge', () => {
   return {
     initWasm: vi.fn().mockResolvedValue(undefined),
     setCellValue: vi.fn((row: number, col: number, value: string) => {
-      mockCells.set(`${row},${col}`, { value, displayValue: value });
+      mockState.cells.set(`${row},${col}`, { value, displayValue: value });
       return [];
     }),
     getCellData: vi.fn((row: number, col: number) => {
       const key = `${row},${col}`;
-      const cell = mockCells.get(key);
+      const cell = mockState.cells.get(key);
       if (cell) {
         return {
           value: cell.value,
@@ -35,7 +39,7 @@ vi.mock('../WasmBridge', () => {
     clearRange: vi.fn((startRow: number, startCol: number, endRow: number, endCol: number) => {
       for (let r = startRow; r <= endRow; r++) {
         for (let c = startCol; c <= endCol; c++) {
-          mockCells.delete(`${r},${c}`);
+          mockState.cells.delete(`${r},${c}`);
         }
       }
       return [];
@@ -47,7 +51,7 @@ vi.mock('../WasmBridge', () => {
       }
 
       // Check for overlap with existing merges
-      for (const m of mockMerges) {
+      for (const m of mockState.merges) {
         const overlaps = !(endRow < m.startRow || startRow > m.endRow ||
                           endCol < m.startCol || startCol > m.endCol);
         if (overlaps) {
@@ -55,7 +59,7 @@ vi.mock('../WasmBridge', () => {
         }
       }
 
-      mockMerges.push({ startRow, startCol, endRow, endCol });
+      mockState.merges.push({ startRow, startCol, endRow, endCol });
 
       // Return affected cells
       const affected: [number, number][] = [];
@@ -67,14 +71,14 @@ vi.mock('../WasmBridge', () => {
       return affected;
     }),
     unmergeCells: vi.fn((row: number, col: number) => {
-      const idx = mockMerges.findIndex(m =>
+      const idx = mockState.merges.findIndex(m =>
         row >= m.startRow && row <= m.endRow &&
         col >= m.startCol && col <= m.endCol
       );
       if (idx === -1) return [];
 
-      const merge = mockMerges[idx];
-      mockMerges.splice(idx, 1);
+      const merge = mockState.merges[idx];
+      mockState.merges.splice(idx, 1);
 
       const affected: [number, number][] = [];
       for (let r = merge.startRow; r <= merge.endRow; r++) {
@@ -84,7 +88,7 @@ vi.mock('../WasmBridge', () => {
       }
       return affected;
     }),
-    getMergedRanges: vi.fn(() => [...mockMerges]),
+    getMergedRanges: vi.fn(() => [...mockState.merges]),
     isMergedSlave: vi.fn((row: number, col: number) => {
       const merge = isCellInMerge(row, col);
       if (!merge) return false;
@@ -102,22 +106,18 @@ vi.mock('../WasmBridge', () => {
     }),
     serialize: vi.fn(() => '{}'),
     deserialize: vi.fn(() => true),
-    __clearMocks: () => {
-      mockCells.clear();
-      mockMerges.length = 0;
-    },
   };
 });
-
-import { RusheetAPI } from '../RusheetAPI';
 
 describe('Cell Merging', () => {
   let api: RusheetAPI;
 
   beforeEach(async () => {
+    // Reset mock state
+    mockState.cells.clear();
+    mockState.merges.length = 0;
+
     api = RusheetAPI.getInstance();
-    // @ts-expect-error - access mock helper
-    (await import('../WasmBridge')).__clearMocks();
     await api.init();
   });
 

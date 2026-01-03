@@ -11,7 +11,7 @@ pub mod workbook;
 
 pub use cell::{Cell, CellContent, CellValue};
 pub use chunk::{Chunk, ChunkCoord, ChunkedGrid};
-pub use error::CellError;
+pub use error::{CellError, RusheetError};
 pub use format::{CellFormat, Color, HorizontalAlign, VerticalAlign};
 pub use gap_buffer::GapBuffer;
 pub use range::{col_from_label, col_to_label, CellCoord, CellRange};

@@ -1,9 +1,13 @@
-use rusheet_core::{CellContent, CellCoord, CellError, CellFormat, CellValue, HorizontalAlign, VerticalAlign, Workbook};
+use rusheet_core::{
+    CellContent, CellCoord, CellError, CellFormat, CellValue, HorizontalAlign, RusheetError,
+    VerticalAlign, Workbook,
+};
 use rusheet_formula::{extract_references, DependencyGraph};
 use rusheet_history::{
-    ApplyFilterCommand, ClearFilterCommand, ClearRangeCommand, HistoryManager, MergeCellsCommand,
-    SetCellFormatCommand, SetCellValueCommand, SetRangeFormatCommand, InsertRowsCommand,
-    DeleteRowsCommand, InsertColsCommand, DeleteColsCommand, SortRangeCommand, UnmergeCellsCommand,
+    ApplyFilterCommand, ClearFilterCommand, ClearRangeCommand, DeleteColsCommand,
+    DeleteRowsCommand, HistoryManager, InsertColsCommand, InsertRowsCommand, MergeCellsCommand,
+    SetCellFormatCommand, SetCellValueCommand, SetRangeFormatCommand, SortRangeCommand,
+    UnmergeCellsCommand,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -19,6 +23,27 @@ pub struct SpreadsheetEngine {
     history: HistoryManager,
     /// Reusable buffer for viewport data (zero-copy optimization)
     viewport_buffer: ViewportBuffer,
+}
+
+/// Structured error object for JavaScript
+#[derive(Serialize)]
+pub struct JsRuSheetError {
+    code: String,
+    message: String,
+}
+
+impl From<RusheetError> for JsRuSheetError {
+    fn from(err: RusheetError) -> Self {
+        Self {
+            code: err.code().to_string(),
+            message: err.to_string(),
+        }
+    }
+}
+
+fn to_js_error(err: RusheetError) -> JsValue {
+    let js_error = JsRuSheetError::from(err);
+    serde_wasm_bindgen::to_value(&js_error).unwrap_or(JsValue::NULL)
 }
 
 /// Cell data for JavaScript
@@ -460,8 +485,8 @@ impl SpreadsheetEngine {
 
     /// Add a new sheet
     #[wasm_bindgen(js_name = addSheet)]
-    pub fn add_sheet(&mut self, name: &str) -> usize {
-        self.workbook.add_sheet(name)
+    pub fn add_sheet(&mut self, name: &str) -> Result<usize, JsValue> {
+        self.workbook.add_sheet(name).map_err(to_js_error)
     }
 
     /// Set active sheet by index
@@ -485,14 +510,20 @@ impl SpreadsheetEngine {
 
     /// Rename a sheet
     #[wasm_bindgen(js_name = renameSheet)]
-    pub fn rename_sheet(&mut self, index: usize, name: &str) -> bool {
-        self.workbook.rename_sheet(index, name)
+    pub fn rename_sheet(&mut self, index: usize, name: &str) -> Result<bool, JsValue> {
+        self.workbook
+            .rename_sheet(index, name)
+            .map(|_| true)
+            .map_err(to_js_error)
     }
 
     /// Delete a sheet
     #[wasm_bindgen(js_name = deleteSheet)]
-    pub fn delete_sheet(&mut self, index: usize) -> bool {
-        self.workbook.remove_sheet(index).is_some()
+    pub fn delete_sheet(&mut self, index: usize) -> Result<bool, JsValue> {
+        self.workbook
+            .remove_sheet(index)
+            .map(|_| true)
+            .map_err(to_js_error)
     }
 
     // --- Row/Column sizing ---

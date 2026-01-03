@@ -1,20 +1,23 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { RusheetAPI } from '../RusheetAPI';
+
+const mockState = vi.hoisted(() => ({
+  cells: new Map<string, { value: string; displayValue: string }>(),
+  hiddenRows: new Set<number>(),
+  activeFilters: new Map<number, string[]>(),
+}));
 
 // Mock WasmBridge for unit tests
 vi.mock('../WasmBridge', () => {
-  const mockCells: Map<string, { value: string; displayValue: string }> = new Map();
-  const mockHiddenRows: Set<number> = new Set();
-  const mockActiveFilters: Map<number, string[]> = new Map();
-
   return {
     initWasm: vi.fn().mockResolvedValue(undefined),
     setCellValue: vi.fn((row: number, col: number, value: string) => {
-      mockCells.set(`${row},${col}`, { value, displayValue: value });
+      mockState.cells.set(`${row},${col}`, { value, displayValue: value });
       return [];
     }),
     getCellData: vi.fn((row: number, col: number) => {
       const key = `${row},${col}`;
-      const cell = mockCells.get(key);
+      const cell = mockState.cells.get(key);
       if (cell) {
         return {
           value: cell.value,
@@ -29,7 +32,7 @@ vi.mock('../WasmBridge', () => {
     clearRange: vi.fn((startRow: number, startCol: number, endRow: number, endCol: number) => {
       for (let r = startRow; r <= endRow; r++) {
         for (let c = startCol; c <= endCol; c++) {
-          mockCells.delete(`${r},${c}`);
+          mockState.cells.delete(`${r},${c}`);
         }
       }
       return [];
@@ -37,7 +40,7 @@ vi.mock('../WasmBridge', () => {
     getUniqueValuesInColumn: vi.fn((col: number, maxRows: number = 10000) => {
       const values = new Set<string>();
       for (let row = 0; row < maxRows; row++) {
-        const cell = mockCells.get(`${row},${col}`);
+        const cell = mockState.cells.get(`${row},${col}`);
         if (cell) {
           values.add(cell.displayValue);
         }
@@ -45,17 +48,17 @@ vi.mock('../WasmBridge', () => {
       return Array.from(values).sort();
     }),
     applyColumnFilter: vi.fn((col: number, visibleValues: string[], maxRows: number = 10000) => {
-      mockActiveFilters.set(col, visibleValues);
+      mockState.activeFilters.set(col, visibleValues);
       const affected: number[] = [];
 
       // Recalculate hidden rows based on all active filters
-      mockHiddenRows.clear();
+      mockState.hiddenRows.clear();
       for (let row = 0; row < maxRows; row++) {
         let shouldHide = false;
 
         // Check each active filter
-        for (const [filterCol, filterValues] of mockActiveFilters.entries()) {
-          const cell = mockCells.get(`${row},${filterCol}`);
+        for (const [filterCol, filterValues] of mockState.activeFilters.entries()) {
+          const cell = mockState.cells.get(`${row},${filterCol}`);
           const cellValue = cell ? cell.displayValue : '';
 
           if (!filterValues.includes(cellValue)) {
@@ -65,7 +68,7 @@ vi.mock('../WasmBridge', () => {
         }
 
         if (shouldHide) {
-          mockHiddenRows.add(row);
+          mockState.hiddenRows.add(row);
           affected.push(row);
         }
       }
@@ -73,19 +76,19 @@ vi.mock('../WasmBridge', () => {
       return affected;
     }),
     clearColumnFilter: vi.fn((col: number) => {
-      mockActiveFilters.delete(col);
+      mockState.activeFilters.delete(col);
       const affected: number[] = [];
 
       // Recalculate hidden rows without this filter
-      const previouslyHidden = new Set(mockHiddenRows);
-      mockHiddenRows.clear();
+      const previouslyHidden = new Set(mockState.hiddenRows);
+      mockState.hiddenRows.clear();
 
-      if (mockActiveFilters.size > 0) {
+      if (mockState.activeFilters.size > 0) {
         for (let row = 0; row < 10000; row++) {
           let shouldHide = false;
 
-          for (const [filterCol, filterValues] of mockActiveFilters.entries()) {
-            const cell = mockCells.get(`${row},${filterCol}`);
+          for (const [filterCol, filterValues] of mockState.activeFilters.entries()) {
+            const cell = mockState.cells.get(`${row},${filterCol}`);
             const cellValue = cell ? cell.displayValue : '';
 
             if (!filterValues.includes(cellValue)) {
@@ -95,14 +98,14 @@ vi.mock('../WasmBridge', () => {
           }
 
           if (shouldHide) {
-            mockHiddenRows.add(row);
+            mockState.hiddenRows.add(row);
           }
         }
       }
 
       // Return rows that changed visibility
       for (const row of previouslyHidden) {
-        if (!mockHiddenRows.has(row)) {
+        if (!mockState.hiddenRows.has(row)) {
           affected.push(row);
         }
       }
@@ -110,45 +113,37 @@ vi.mock('../WasmBridge', () => {
       return affected;
     }),
     clearAllFilters: vi.fn(() => {
-      mockActiveFilters.clear();
-      const affected = Array.from(mockHiddenRows);
-      mockHiddenRows.clear();
+      mockState.activeFilters.clear();
+      const affected = Array.from(mockState.hiddenRows);
+      mockState.hiddenRows.clear();
       return affected;
     }),
     getActiveFilters: vi.fn(() => {
-      return Array.from(mockActiveFilters.entries()).map(([col, visibleValues]) => ({
+      return Array.from(mockState.activeFilters.entries()).map(([col, visibleValues]) => ({
         col,
         visibleValues,
       }));
     }),
     isRowHidden: vi.fn((row: number) => {
-      return mockHiddenRows.has(row);
+      return mockState.hiddenRows.has(row);
     }),
     serialize: vi.fn(() => '{}'),
     deserialize: vi.fn(() => true),
-    __clearMockCells: () => mockCells.clear(),
-    __clearMockHiddenRows: () => mockHiddenRows.clear(),
-    __clearMockFilters: () => mockActiveFilters.clear(),
-    __getMockCells: () => mockCells,
-    __getMockHiddenRows: () => mockHiddenRows,
-    __getMockFilters: () => mockActiveFilters,
+    getHiddenRows: vi.fn(() => Array.from(mockState.hiddenRows)),
   };
 });
-
-import { RusheetAPI } from '../RusheetAPI';
 
 describe('Filtering', () => {
   let api: RusheetAPI;
 
   beforeEach(async () => {
     api = RusheetAPI.getInstance();
-    const wasmBridge = await import('../WasmBridge');
-    // @ts-expect-error - access mock helper
-    wasmBridge.__clearMockCells();
-    // @ts-expect-error - access mock helper
-    wasmBridge.__clearMockHiddenRows();
-    // @ts-expect-error - access mock helper
-    wasmBridge.__clearMockFilters();
+    
+    // Reset mock state
+    mockState.cells.clear();
+    mockState.hiddenRows.clear();
+    mockState.activeFilters.clear();
+    
     await api.init();
   });
 

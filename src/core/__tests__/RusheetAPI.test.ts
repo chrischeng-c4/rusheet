@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+const mockValues = vi.hoisted(() => ({
+  undo: [[0, 0]],
+  redo: [[0, 0]],
+}));
+
 // Mock WasmBridge before importing RusheetAPI
 vi.mock('../WasmBridge', () => ({
   initWasm: vi.fn().mockResolvedValue(undefined),
@@ -8,8 +13,8 @@ vi.mock('../WasmBridge', () => ({
   setCellFormat: vi.fn().mockReturnValue(true),
   setRangeFormat: vi.fn().mockReturnValue(true),
   clearRange: vi.fn().mockReturnValue([]),
-  undo: vi.fn().mockReturnValue([[0, 0]]),
-  redo: vi.fn().mockReturnValue([[0, 0]]),
+  undo: vi.fn().mockReturnValue(mockValues.undo),
+  redo: vi.fn().mockReturnValue(mockValues.redo),
   canUndo: vi.fn().mockReturnValue(true),
   canRedo: vi.fn().mockReturnValue(true),
   addSheet: vi.fn().mockReturnValue(1),
@@ -26,6 +31,26 @@ vi.mock('../WasmBridge', () => ({
   deserialize: vi.fn().mockReturnValue(true),
   getViewportData: vi.fn().mockReturnValue([]),
   getViewportArrays: vi.fn().mockReturnValue({ rows: new Uint32Array(0), cols: new Uint32Array(0), values: new Float64Array(0), formats: new Uint32Array(0), displayValues: [], length: 0 }),
+  // Mock filter functions
+  getUniqueValuesInColumn: vi.fn().mockReturnValue([]),
+  applyColumnFilter: vi.fn().mockReturnValue([]),
+  clearColumnFilter: vi.fn().mockReturnValue([]),
+  clearAllFilters: vi.fn().mockReturnValue([]),
+  getActiveFilters: vi.fn().mockReturnValue([]),
+  isRowHidden: vi.fn().mockReturnValue(false),
+  getHiddenRows: vi.fn().mockReturnValue([]),
+  // Mock merging functions
+  mergeCells: vi.fn().mockReturnValue([]),
+  unmergeCells: vi.fn().mockReturnValue([]),
+  getMergedRanges: vi.fn().mockReturnValue([]),
+  isMergedSlave: vi.fn().mockReturnValue(false),
+  getMergeInfo: vi.fn().mockReturnValue(null),
+  // Mock row/col operations
+  insertRows: vi.fn().mockReturnValue([]),
+  deleteRows: vi.fn().mockReturnValue([]),
+  insertCols: vi.fn().mockReturnValue([]),
+  deleteCols: vi.fn().mockReturnValue([]),
+  sortRange: vi.fn().mockReturnValue([]),
 }));
 
 import { RusheetAPI } from '../RusheetAPI';
@@ -34,6 +59,8 @@ import type {
   CellChangeEvent,
   FormatChangeEvent,
   SheetAddEvent,
+  SheetDeleteEvent,
+  SheetRenameEvent,
   ActiveSheetChangeEvent,
   UndoEvent,
   RedoEvent
@@ -52,6 +79,7 @@ describe('RusheetAPI Event System', () => {
 
   afterEach(() => {
     emitter.removeAllListeners();
+    vi.clearAllMocks();
   });
 
   describe('onChange', () => {
@@ -143,6 +171,77 @@ describe('RusheetAPI Event System', () => {
           source: 'user',
         })
       );
+    });
+  });
+
+  describe('onSheetRename', () => {
+    it('should emit sheetRename event on success', () => {
+      const callback = vi.fn();
+      api.onSheetRename(callback);
+
+      // WasmBridge mock returns true by default
+      const success = api.renameSheet(0, 'RenamedSheet', 'user');
+
+      expect(success).toBe(true);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          index: 0,
+          oldName: 'Sheet1',
+          newName: 'RenamedSheet',
+          source: 'user',
+        })
+      );
+    });
+
+    it('should handle errors gracefully', async () => {
+      const callback = vi.fn();
+      api.onSheetRename(callback);
+
+      // Mock WasmBridge to throw an error
+      const wasmBridge = await import('../WasmBridge');
+      vi.mocked(wasmBridge.renameSheet).mockImplementationOnce(() => {
+        throw { code: 'SHEET_NAME_EXISTS', message: 'Name exists' };
+      });
+
+      const success = api.renameSheet(0, 'ExistingName', 'user');
+
+      expect(success).toBe(false);
+      expect(callback).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('onSheetDelete', () => {
+    it('should emit sheetDelete event on success', () => {
+      const callback = vi.fn();
+      api.onSheetDelete(callback);
+
+      const success = api.deleteSheet(0, 'user');
+
+      expect(success).toBe(true);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          index: 0,
+          name: 'Sheet1',
+          source: 'user',
+        })
+      );
+    });
+
+    it('should handle errors gracefully', async () => {
+      const callback = vi.fn();
+      api.onSheetDelete(callback);
+
+      const wasmBridge = await import('../WasmBridge');
+      vi.mocked(wasmBridge.deleteSheet).mockImplementationOnce(() => {
+        throw { code: 'CANNOT_DELETE_LAST_SHEET', message: 'Last sheet' };
+      });
+
+      const success = api.deleteSheet(0, 'user');
+
+      expect(success).toBe(false);
+      expect(callback).not.toHaveBeenCalled();
     });
   });
 
