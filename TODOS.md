@@ -213,8 +213,11 @@ This document outlines all pending work, known issues, and future features for R
 ### P2: Medium Priority (Feature Completeness)
 
 #### 公式
-- [ ] **Advanced Lookup Functions**
-  - INDEX, MATCH, OFFSET, INDIRECT
+- [~] **Advanced Lookup Functions**
+  - [~] MATCH (Implementation in progress)
+  - [ ] INDEX
+  - [ ] OFFSET
+  - [ ] INDIRECT
 
 - [ ] **Array Formulas**
   - ARRAYFORMULA 支援
