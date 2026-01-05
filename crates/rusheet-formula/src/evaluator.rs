@@ -252,7 +252,120 @@ where
             "SECOND" => functions::datetime::second(&values),
             "DATEDIF" => functions::datetime::datedif(&values),
 
+            // Lookup functions
+            "MATCH" => {
+                if args.len() < 2 {
+                    return CellValue::Error(CellError::InvalidValue);
+                }
+                let lookup_value = self.evaluate(&args[0]);
+                let lookup_array = self.expand_argument(&args[1]);
+                let match_type = if args.len() > 2 {
+                    match self.evaluate(&args[2]) {
+                        CellValue::Number(n) => n as i32,
+                        _ => 1,
+                    }
+                } else {
+                    1
+                };
+                functions::lookup::match_fn(&lookup_value, &lookup_array, match_type)
+            }
+
+            "VLOOKUP" => {
+                if args.len() < 3 {
+                    return CellValue::Error(CellError::InvalidValue);
+                }
+
+                let lookup_value = self.evaluate(&args[0]);
+
+                // For table_array, we need dimensions
+                let (table_data, num_rows, num_cols) = self.expand_range_with_dimensions(&args[1]);
+
+                let col_index = match self.evaluate(&args[2]) {
+                    CellValue::Number(n) => n as usize,
+                    _ => return CellValue::Error(CellError::InvalidValue),
+                };
+
+                let approximate = if args.len() > 3 {
+                    match self.evaluate(&args[3]) {
+                        CellValue::Boolean(b) => b,
+                        CellValue::Number(n) => n != 0.0,
+                        _ => true,
+                    }
+                } else {
+                    true
+                };
+
+                functions::lookup::vlookup(&lookup_value, &table_data, num_rows, num_cols, col_index, approximate)
+            }
+
+            "HLOOKUP" => {
+                if args.len() < 3 {
+                    return CellValue::Error(CellError::InvalidValue);
+                }
+
+                let lookup_value = self.evaluate(&args[0]);
+
+                // For table_array, we need dimensions
+                let (table_data, num_rows, num_cols) = self.expand_range_with_dimensions(&args[1]);
+
+                let row_index = match self.evaluate(&args[2]) {
+                    CellValue::Number(n) => n as usize,
+                    _ => return CellValue::Error(CellError::InvalidValue),
+                };
+
+                let approximate = if args.len() > 3 {
+                    match self.evaluate(&args[3]) {
+                        CellValue::Boolean(b) => b,
+                        CellValue::Number(n) => n != 0.0,
+                        _ => true,
+                    }
+                } else {
+                    true
+                };
+
+                functions::lookup::hlookup(&lookup_value, &table_data, num_rows, num_cols, row_index, approximate)
+            }
+
             _ => CellValue::Error(CellError::InvalidName),
+        }
+    }
+
+    /// Expand a range with dimensions needed for VLOOKUP/HLOOKUP
+    fn expand_range_with_dimensions(&self, expr: &Expr) -> (Vec<CellValue>, usize, usize) {
+        match expr {
+            Expr::Range { start, end } => {
+                let (start_row, start_col) = self.get_cell_coords(start);
+                let (end_row, end_col) = self.get_cell_coords(end);
+
+                let min_row = start_row.min(end_row);
+                let max_row = start_row.max(end_row);
+                let min_col = start_col.min(end_col);
+                let max_col = start_col.max(end_col);
+
+                let num_rows = (max_row - min_row + 1) as usize;
+                let num_cols = (max_col - min_col + 1) as usize;
+
+                let mut values = Vec::with_capacity(num_rows * num_cols);
+                for row in min_row..=max_row {
+                    for col in min_col..=max_col {
+                        values.push((self.get_cell_value)(row, col));
+                    }
+                }
+
+                (values, num_rows, num_cols)
+            }
+            _ => {
+                let value = self.evaluate(expr);
+                (vec![value], 1, 1)
+            }
+        }
+    }
+
+    /// Get cell coordinates from a CellRef expression
+    fn get_cell_coords(&self, expr: &Expr) -> (u32, u32) {
+        match expr {
+            Expr::CellRef { col, row, .. } => (*row, *col),
+            _ => (0, 0),
         }
     }
 
@@ -561,6 +674,80 @@ where
             "SECOND" => functions::datetime::second(&values),
             "DATEDIF" => functions::datetime::datedif(&values),
 
+            // Lookup functions
+            "MATCH" => {
+                if args.len() < 2 {
+                    return CellValue::Error(CellError::InvalidValue);
+                }
+                let lookup_value = self.evaluate(&args[0]);
+                let lookup_array = self.expand_argument(&args[1]);
+                let match_type = if args.len() > 2 {
+                    match self.evaluate(&args[2]) {
+                        CellValue::Number(n) => n as i32,
+                        _ => 1,
+                    }
+                } else {
+                    1
+                };
+                functions::lookup::match_fn(&lookup_value, &lookup_array, match_type)
+            }
+
+            "VLOOKUP" => {
+                if args.len() < 3 {
+                    return CellValue::Error(CellError::InvalidValue);
+                }
+
+                let lookup_value = self.evaluate(&args[0]);
+
+                // For table_array, we need dimensions
+                let (table_data, num_rows, num_cols) = self.expand_range_with_dimensions(&args[1]);
+
+                let col_index = match self.evaluate(&args[2]) {
+                    CellValue::Number(n) => n as usize,
+                    _ => return CellValue::Error(CellError::InvalidValue),
+                };
+
+                let approximate = if args.len() > 3 {
+                    match self.evaluate(&args[3]) {
+                        CellValue::Boolean(b) => b,
+                        CellValue::Number(n) => n != 0.0,
+                        _ => true,
+                    }
+                } else {
+                    true
+                };
+
+                functions::lookup::vlookup(&lookup_value, &table_data, num_rows, num_cols, col_index, approximate)
+            }
+
+            "HLOOKUP" => {
+                if args.len() < 3 {
+                    return CellValue::Error(CellError::InvalidValue);
+                }
+
+                let lookup_value = self.evaluate(&args[0]);
+
+                // For table_array, we need dimensions
+                let (table_data, num_rows, num_cols) = self.expand_range_with_dimensions(&args[1]);
+
+                let row_index = match self.evaluate(&args[2]) {
+                    CellValue::Number(n) => n as usize,
+                    _ => return CellValue::Error(CellError::InvalidValue),
+                };
+
+                let approximate = if args.len() > 3 {
+                    match self.evaluate(&args[3]) {
+                        CellValue::Boolean(b) => b,
+                        CellValue::Number(n) => n != 0.0,
+                        _ => true,
+                    }
+                } else {
+                    true
+                };
+
+                functions::lookup::hlookup(&lookup_value, &table_data, num_rows, num_cols, row_index, approximate)
+            }
+
             _ => CellValue::Error(CellError::InvalidName),
         }
     }
@@ -607,6 +794,74 @@ where
             values
         } else {
             vec![CellValue::Error(CellError::InvalidReference)]
+        }
+    }
+
+    /// Expand a range with dimensions needed for VLOOKUP/HLOOKUP
+    fn expand_range_with_dimensions(&self, expr: &Expr) -> (Vec<CellValue>, usize, usize) {
+        match expr {
+            Expr::Range { start, end } => {
+                let (start_row, start_col) = self.get_cell_coords_from_expr(start);
+                let (end_row, end_col) = self.get_cell_coords_from_expr(end);
+
+                let min_row = start_row.min(end_row);
+                let max_row = start_row.max(end_row);
+                let min_col = start_col.min(end_col);
+                let max_col = start_col.max(end_col);
+
+                let num_rows = (max_row - min_row + 1) as usize;
+                let num_cols = (max_col - min_col + 1) as usize;
+
+                let mut values = Vec::with_capacity(num_rows * num_cols);
+                for row in min_row..=max_row {
+                    for col in min_col..=max_col {
+                        values.push((self.get_cell_value)(self.current_sheet.as_deref(), row, col));
+                    }
+                }
+
+                (values, num_rows, num_cols)
+            }
+            Expr::SheetRef { sheet_name, reference } => {
+                match reference.as_ref() {
+                    Expr::Range { start, end } => {
+                        let (start_row, start_col) = self.get_cell_coords_from_expr(start);
+                        let (end_row, end_col) = self.get_cell_coords_from_expr(end);
+
+                        let min_row = start_row.min(end_row);
+                        let max_row = start_row.max(end_row);
+                        let min_col = start_col.min(end_col);
+                        let max_col = start_col.max(end_col);
+
+                        let num_rows = (max_row - min_row + 1) as usize;
+                        let num_cols = (max_col - min_col + 1) as usize;
+
+                        let mut values = Vec::with_capacity(num_rows * num_cols);
+                        for row in min_row..=max_row {
+                            for col in min_col..=max_col {
+                                values.push((self.get_cell_value)(Some(sheet_name), row, col));
+                            }
+                        }
+
+                        (values, num_rows, num_cols)
+                    }
+                    _ => {
+                        let value = self.evaluate(expr);
+                        (vec![value], 1, 1)
+                    }
+                }
+            }
+            _ => {
+                let value = self.evaluate(expr);
+                (vec![value], 1, 1)
+            }
+        }
+    }
+
+    /// Get cell coordinates from a CellRef expression
+    fn get_cell_coords_from_expr(&self, expr: &Expr) -> (u32, u32) {
+        match expr {
+            Expr::CellRef { col, row, .. } => (*row, *col),
+            _ => (0, 0),
         }
     }
 }
@@ -790,5 +1045,97 @@ mod tests {
             }
         });
         assert!(matches!(result, CellValue::Error(CellError::InvalidReference)));
+    }
+
+    #[test]
+    fn test_vlookup() {
+        // Create a lookup table:
+        // | ID | Name  | Score |
+        // | 10 | Alice | 85    |
+        // | 20 | Bob   | 90    |
+        // | 30 | Carol | 75    |
+        let result = eval_with_cells("VLOOKUP(20, A1:C3, 2, FALSE)", |row, col| {
+            match (row, col) {
+                // Row 0: 10, Alice, 85
+                (0, 0) => CellValue::Number(10.0),
+                (0, 1) => CellValue::Text("Alice".to_string()),
+                (0, 2) => CellValue::Number(85.0),
+                // Row 1: 20, Bob, 90
+                (1, 0) => CellValue::Number(20.0),
+                (1, 1) => CellValue::Text("Bob".to_string()),
+                (1, 2) => CellValue::Number(90.0),
+                // Row 2: 30, Carol, 75
+                (2, 0) => CellValue::Number(30.0),
+                (2, 1) => CellValue::Text("Carol".to_string()),
+                (2, 2) => CellValue::Number(75.0),
+                _ => CellValue::Empty,
+            }
+        });
+        assert_eq!(result, CellValue::Text("Bob".to_string()));
+    }
+
+    #[test]
+    fn test_vlookup_approximate() {
+        // Grade lookup table (sorted):
+        // | Grade | Letter |
+        // | 0     | F      |
+        // | 60    | D      |
+        // | 70    | C      |
+        // | 80    | B      |
+        // | 90    | A      |
+        let result = eval_with_cells("VLOOKUP(85, A1:B5, 2, TRUE)", |row, col| {
+            match (row, col) {
+                (0, 0) => CellValue::Number(0.0),
+                (0, 1) => CellValue::Text("F".to_string()),
+                (1, 0) => CellValue::Number(60.0),
+                (1, 1) => CellValue::Text("D".to_string()),
+                (2, 0) => CellValue::Number(70.0),
+                (2, 1) => CellValue::Text("C".to_string()),
+                (3, 0) => CellValue::Number(80.0),
+                (3, 1) => CellValue::Text("B".to_string()),
+                (4, 0) => CellValue::Number(90.0),
+                (4, 1) => CellValue::Text("A".to_string()),
+                _ => CellValue::Empty,
+            }
+        });
+        assert_eq!(result, CellValue::Text("B".to_string()));
+    }
+
+    #[test]
+    fn test_hlookup() {
+        // Horizontal lookup table:
+        // | Product A | Product B | Product C |
+        // | 100       | 200       | 300       |
+        // | In Stock  | Sold Out  | In Stock  |
+        let result = eval_with_cells("HLOOKUP(\"Product B\", A1:C3, 2, FALSE)", |row, col| {
+            match (row, col) {
+                // Row 0: Product A, Product B, Product C
+                (0, 0) => CellValue::Text("Product A".to_string()),
+                (0, 1) => CellValue::Text("Product B".to_string()),
+                (0, 2) => CellValue::Text("Product C".to_string()),
+                // Row 1: 100, 200, 300
+                (1, 0) => CellValue::Number(100.0),
+                (1, 1) => CellValue::Number(200.0),
+                (1, 2) => CellValue::Number(300.0),
+                // Row 2: In Stock, Sold Out, In Stock
+                (2, 0) => CellValue::Text("In Stock".to_string()),
+                (2, 1) => CellValue::Text("Sold Out".to_string()),
+                (2, 2) => CellValue::Text("In Stock".to_string()),
+                _ => CellValue::Empty,
+            }
+        });
+        assert_eq!(result, CellValue::Number(200.0));
+    }
+
+    #[test]
+    fn test_match() {
+        let result = eval_with_cells("MATCH(20, A1:A3, 0)", |row, col| {
+            if col == 0 && row < 3 {
+                CellValue::Number((row + 1) as f64 * 10.0) // 10, 20, 30
+            } else {
+                CellValue::Empty
+            }
+        });
+        assert_eq!(result, CellValue::Number(2.0)); // Found at position 2
     }
 }

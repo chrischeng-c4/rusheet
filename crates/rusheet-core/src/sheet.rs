@@ -3,8 +3,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::cell::{Cell, CellContent, CellValue};
 use crate::chunk::ChunkedGrid;
+use crate::conditional_format::ConditionalFormattingRule;
+use crate::format::CellFormat;
 use crate::range::{CellCoord, CellRange};
 use crate::spatial::SpatialIndex;
+use crate::validation::{DataValidationRule, ValidationResult};
 
 /// Represents a filter applied to a column
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +53,12 @@ pub struct Sheet {
     /// Active column filters
     #[serde(default)]
     pub active_filters: Vec<FilterState>,
+    /// Conditional formatting rules
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditional_formatting: Vec<ConditionalFormattingRule>,
+    /// Data validation rules
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub data_validation: Vec<DataValidationRule>,
     /// Spatial index for O(log N) position lookups (rebuilt on deserialize)
     #[serde(skip, default = "SpatialIndex::new")]
     spatial: SpatialIndex,
@@ -174,6 +183,8 @@ impl Sheet {
             frozen_cols: 0,
             merged_ranges: Vec::new(),
             active_filters: Vec::new(),
+            conditional_formatting: Vec::new(),
+            data_validation: Vec::new(),
             spatial: SpatialIndex::new(),
         }
     }
@@ -917,6 +928,130 @@ impl Sheet {
     pub fn get_active_filters(&self) -> &[FilterState] {
         &self.active_filters
     }
+
+    // =========================================================================
+    // Conditional Formatting
+    // =========================================================================
+
+    /// Add a conditional formatting rule
+    pub fn add_conditional_formatting(&mut self, rule: ConditionalFormattingRule) {
+        self.conditional_formatting.push(rule);
+        self.conditional_formatting.sort_by_key(|r| r.priority);
+    }
+
+    /// Remove a conditional formatting rule by ID
+    /// Returns true if a rule was removed
+    pub fn remove_conditional_formatting(&mut self, rule_id: &str) -> bool {
+        let len_before = self.conditional_formatting.len();
+        self.conditional_formatting.retain(|r| r.id != rule_id);
+        self.conditional_formatting.len() < len_before
+    }
+
+    /// Get all conditional formatting rules
+    pub fn get_conditional_formatting_rules(&self) -> &[ConditionalFormattingRule] {
+        &self.conditional_formatting
+    }
+
+    /// Get the effective format for a cell, applying conditional formatting rules
+    /// This combines the base format with any matching conditional formats
+    pub fn get_effective_format(
+        &self,
+        row: u32,
+        col: u32,
+        base_format: &CellFormat,
+        value: &CellValue,
+    ) -> CellFormat {
+        let mut result = base_format.clone();
+        let coord = CellCoord::new(row, col);
+
+        // Calculate min/max for color scales (could be optimized with caching)
+        let (min_val, max_val) = self.calculate_range_min_max();
+
+        for rule in &self.conditional_formatting {
+            if !rule.enabled || !rule.range.contains(coord) {
+                continue;
+            }
+
+            if let Some(fmt) = rule.rule.evaluate(value, min_val, max_val) {
+                result = fmt.apply_to(&result);
+            }
+        }
+
+        result
+    }
+
+    /// Calculate the min and max numeric values in the sheet
+    /// Used for color scale calculations
+    fn calculate_range_min_max(&self) -> (f64, f64) {
+        let mut min = f64::MAX;
+        let mut max = f64::MIN;
+        let mut found_any = false;
+
+        for ((_, _), cell) in self.cells.iter() {
+            if let CellValue::Number(n) = cell.content.computed_value() {
+                min = min.min(*n);
+                max = max.max(*n);
+                found_any = true;
+            }
+        }
+
+        if !found_any || min > max {
+            (0.0, 0.0)
+        } else {
+            (min, max)
+        }
+    }
+
+    // =========================================================================
+    // Data Validation
+    // =========================================================================
+
+    /// Add a data validation rule
+    /// If a rule with the same ID exists, it will be replaced
+    pub fn add_data_validation(&mut self, rule: DataValidationRule) {
+        // Remove existing rule with same ID if exists
+        self.data_validation.retain(|r| r.id != rule.id);
+        self.data_validation.push(rule);
+    }
+
+    /// Remove a data validation rule by ID
+    /// Returns true if a rule was removed
+    pub fn remove_data_validation(&mut self, rule_id: &str) -> bool {
+        let len_before = self.data_validation.len();
+        self.data_validation.retain(|r| r.id != rule_id);
+        self.data_validation.len() < len_before
+    }
+
+    /// Get the validation rule that applies to a specific cell
+    /// Returns the first enabled rule whose range contains the cell
+    pub fn get_validation_rule(&self, row: u32, col: u32) -> Option<&DataValidationRule> {
+        let coord = CellCoord::new(row, col);
+        self.data_validation.iter()
+            .find(|r| r.enabled && r.range.contains(coord))
+    }
+
+    /// Validate a cell value at the given position
+    /// Returns Valid if no rule applies or validation passes
+    pub fn validate_cell_value(&self, row: u32, col: u32, value: &CellValue) -> ValidationResult {
+        if let Some(rule) = self.get_validation_rule(row, col) {
+            rule.validate(value)
+        } else {
+            ValidationResult::Valid
+        }
+    }
+
+    /// Get dropdown items for a cell (if it has a list validation with static values)
+    /// Returns None if the cell has no validation, or if validation is not a dropdown,
+    /// or if the dropdown uses a range reference (needs context)
+    pub fn get_cell_dropdown_items(&self, row: u32, col: u32) -> Option<Vec<String>> {
+        self.get_validation_rule(row, col)
+            .and_then(|rule| rule.get_dropdown_items())
+    }
+
+    /// Get all data validation rules
+    pub fn get_data_validation_rules(&self) -> &[DataValidationRule] {
+        &self.data_validation
+    }
 }
 
 // Custom Deserialize implementation to rebuild spatial index after deserialization
@@ -947,6 +1082,10 @@ impl<'de> Deserialize<'de> for Sheet {
             merged_ranges: Vec<CellRange>,
             #[serde(default)]
             active_filters: Vec<FilterState>,
+            #[serde(default)]
+            conditional_formatting: Vec<ConditionalFormattingRule>,
+            #[serde(default)]
+            data_validation: Vec<DataValidationRule>,
         }
 
         let helper = SheetHelper::deserialize(deserializer)?;
@@ -962,6 +1101,8 @@ impl<'de> Deserialize<'de> for Sheet {
             frozen_cols: helper.frozen_cols,
             merged_ranges: helper.merged_ranges,
             active_filters: helper.active_filters,
+            conditional_formatting: helper.conditional_formatting,
+            data_validation: helper.data_validation,
             spatial: SpatialIndex::new(),
         };
 
@@ -1491,5 +1632,307 @@ mod tests {
         let deleted = sheet.delete_cols(1, 0);
         assert_eq!(deleted.len(), 0);
         assert_eq!(sheet.get_cell_value(CellCoord::new(0, 0)).as_number(), Some(1.0));
+    }
+
+    #[test]
+    fn test_conditional_formatting_add_remove() {
+        use crate::{ConditionalFormattingRule, ConditionalRule, ConditionalFormat, ComparisonOperator, Color};
+
+        let mut sheet = Sheet::new("Test");
+
+        // Add a rule
+        let rule = ConditionalFormattingRule::new(
+            "rule1".to_string(),
+            CellRange::new(CellCoord::new(0, 0), CellCoord::new(5, 5)),
+            ConditionalRule::ValueBased {
+                operator: ComparisonOperator::GreaterThan,
+                value1: 50.0,
+                value2: None,
+                format: ConditionalFormat {
+                    background_color: Some(Color::RED),
+                    ..Default::default()
+                },
+            },
+        );
+
+        sheet.add_conditional_formatting(rule);
+        assert_eq!(sheet.conditional_formatting.len(), 1);
+
+        // Remove the rule
+        assert!(sheet.remove_conditional_formatting("rule1"));
+        assert_eq!(sheet.conditional_formatting.len(), 0);
+
+        // Try to remove non-existent rule
+        assert!(!sheet.remove_conditional_formatting("rule2"));
+    }
+
+    #[test]
+    fn test_conditional_formatting_effective_format() {
+        use crate::{ConditionalFormattingRule, ConditionalRule, ConditionalFormat, ComparisonOperator, Color};
+
+        let mut sheet = Sheet::new("Test");
+
+        // Add cells with values
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(60.0));
+        sheet.set_cell(CellCoord::new(0, 1), Cell::number(30.0));
+
+        // Add conditional formatting rule
+        let rule = ConditionalFormattingRule::new(
+            "rule1".to_string(),
+            CellRange::new(CellCoord::new(0, 0), CellCoord::new(5, 5)),
+            ConditionalRule::ValueBased {
+                operator: ComparisonOperator::GreaterThan,
+                value1: 50.0,
+                value2: None,
+                format: ConditionalFormat {
+                    background_color: Some(Color::RED),
+                    bold: Some(true),
+                    ..Default::default()
+                },
+            },
+        );
+
+        sheet.add_conditional_formatting(rule);
+
+        // Get effective format for cell with value > 50
+        let base_format = CellFormat::default();
+        let value = sheet.get_cell_value(CellCoord::new(0, 0));
+        let effective = sheet.get_effective_format(0, 0, &base_format, value);
+
+        assert_eq!(effective.background_color, Some(Color::RED));
+        assert!(effective.bold);
+
+        // Get effective format for cell with value <= 50
+        let value = sheet.get_cell_value(CellCoord::new(0, 1));
+        let effective = sheet.get_effective_format(0, 1, &base_format, value);
+
+        // Should not have conditional formatting applied
+        assert_eq!(effective.background_color, None);
+        assert!(!effective.bold);
+    }
+
+    #[test]
+    fn test_conditional_formatting_priority() {
+        use crate::{ConditionalFormattingRule, ConditionalRule, ConditionalFormat, ComparisonOperator, Color};
+
+        let mut sheet = Sheet::new("Test");
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(60.0));
+
+        // Add two overlapping rules with different priorities
+        let mut rule1 = ConditionalFormattingRule::new(
+            "rule1".to_string(),
+            CellRange::new(CellCoord::new(0, 0), CellCoord::new(5, 5)),
+            ConditionalRule::ValueBased {
+                operator: ComparisonOperator::GreaterThan,
+                value1: 50.0,
+                value2: None,
+                format: ConditionalFormat {
+                    background_color: Some(Color::RED),
+                    ..Default::default()
+                },
+            },
+        );
+        rule1.priority = 1;
+
+        let mut rule2 = ConditionalFormattingRule::new(
+            "rule2".to_string(),
+            CellRange::new(CellCoord::new(0, 0), CellCoord::new(5, 5)),
+            ConditionalRule::ValueBased {
+                operator: ComparisonOperator::GreaterThan,
+                value1: 40.0,
+                value2: None,
+                format: ConditionalFormat {
+                    background_color: Some(Color::GREEN),
+                    ..Default::default()
+                },
+            },
+        );
+        rule2.priority = 2;
+
+        sheet.add_conditional_formatting(rule1);
+        sheet.add_conditional_formatting(rule2);
+
+        // Both rules match, but rule2 has higher priority
+        let base_format = CellFormat::default();
+        let value = sheet.get_cell_value(CellCoord::new(0, 0));
+        let effective = sheet.get_effective_format(0, 0, &base_format, value);
+
+        // Should have GREEN background from rule2 (higher priority)
+        assert_eq!(effective.background_color, Some(Color::GREEN));
+    }
+
+    #[test]
+    fn test_conditional_formatting_color_scale() {
+        use crate::{ConditionalFormattingRule, ConditionalRule, Color};
+
+        let mut sheet = Sheet::new("Test");
+
+        // Add cells with values for color scale
+        sheet.set_cell(CellCoord::new(0, 0), Cell::number(0.0));
+        sheet.set_cell(CellCoord::new(0, 1), Cell::number(50.0));
+        sheet.set_cell(CellCoord::new(0, 2), Cell::number(100.0));
+
+        let rule = ConditionalFormattingRule::new(
+            "color_scale".to_string(),
+            CellRange::new(CellCoord::new(0, 0), CellCoord::new(0, 2)),
+            ConditionalRule::ColorScale {
+                min_color: Color::rgb(255, 0, 0),
+                max_color: Color::rgb(0, 255, 0),
+                mid_color: None,
+            },
+        );
+
+        sheet.add_conditional_formatting(rule);
+
+        let base_format = CellFormat::default();
+
+        // Check min value (should be red)
+        let value = sheet.get_cell_value(CellCoord::new(0, 0));
+        let effective = sheet.get_effective_format(0, 0, &base_format, value);
+        let color = effective.background_color.unwrap();
+        assert_eq!(color.r, 255);
+        assert_eq!(color.g, 0);
+
+        // Check max value (should be green)
+        let value = sheet.get_cell_value(CellCoord::new(0, 2));
+        let effective = sheet.get_effective_format(0, 2, &base_format, value);
+        let color = effective.background_color.unwrap();
+        assert_eq!(color.r, 0);
+        assert_eq!(color.g, 255);
+
+        // Check mid value (should be yellowish)
+        let value = sheet.get_cell_value(CellCoord::new(0, 1));
+        let effective = sheet.get_effective_format(0, 1, &base_format, value);
+        let color = effective.background_color.unwrap();
+        assert!(color.r > 100 && color.r < 150);
+        assert!(color.g > 100 && color.g < 150);
+    }
+
+    #[test]
+    fn test_data_validation_add_remove() {
+        use crate::{DataValidationRule, ValidationCriteria, ValidationOperator};
+
+        let mut sheet = Sheet::new("Test");
+
+        // Add a validation rule
+        let rule = DataValidationRule::new(
+            "rule1".to_string(),
+            CellRange::new(CellCoord::new(0, 0), CellCoord::new(5, 5)),
+            ValidationCriteria::WholeNumber {
+                operator: ValidationOperator::Between,
+                value1: 1,
+                value2: Some(100),
+            },
+        );
+
+        sheet.add_data_validation(rule);
+        assert_eq!(sheet.data_validation.len(), 1);
+
+        // Remove the rule
+        assert!(sheet.remove_data_validation("rule1"));
+        assert_eq!(sheet.data_validation.len(), 0);
+
+        // Try to remove non-existent rule
+        assert!(!sheet.remove_data_validation("rule2"));
+    }
+
+    #[test]
+    fn test_data_validation_cell_validation() {
+        use crate::{DataValidationRule, ValidationCriteria, ValidationOperator, ValidationResult};
+
+        let mut sheet = Sheet::new("Test");
+
+        // Add validation rule for a range
+        let rule = DataValidationRule::new(
+            "rule1".to_string(),
+            CellRange::new(CellCoord::new(0, 0), CellCoord::new(5, 5)),
+            ValidationCriteria::WholeNumber {
+                operator: ValidationOperator::Between,
+                value1: 1,
+                value2: Some(100),
+            },
+        );
+
+        sheet.add_data_validation(rule);
+
+        // Test valid value
+        let result = sheet.validate_cell_value(0, 0, &CellValue::Number(50.0));
+        assert_eq!(result, ValidationResult::Valid);
+
+        // Test invalid value
+        let result = sheet.validate_cell_value(0, 0, &CellValue::Number(150.0));
+        assert!(matches!(result, ValidationResult::Invalid(_)));
+
+        // Test cell outside validation range
+        let result = sheet.validate_cell_value(10, 10, &CellValue::Number(150.0));
+        assert_eq!(result, ValidationResult::Valid);
+    }
+
+    #[test]
+    fn test_data_validation_dropdown_items() {
+        use crate::{DataValidationRule, ValidationCriteria, ListSource};
+
+        let mut sheet = Sheet::new("Test");
+
+        // Add dropdown validation
+        let rule = DataValidationRule::new(
+            "rule1".to_string(),
+            CellRange::new(CellCoord::new(0, 0), CellCoord::new(5, 0)),
+            ValidationCriteria::List {
+                source: ListSource::Values {
+                    items: vec!["Option A".into(), "Option B".into(), "Option C".into()]
+                },
+                show_dropdown: true,
+            },
+        );
+
+        sheet.add_data_validation(rule);
+
+        // Get dropdown items for a cell in the range
+        let items = sheet.get_cell_dropdown_items(0, 0);
+        assert_eq!(items, Some(vec!["Option A".into(), "Option B".into(), "Option C".into()]));
+
+        // Get dropdown items for a cell outside the range
+        let items = sheet.get_cell_dropdown_items(10, 0);
+        assert_eq!(items, None);
+    }
+
+    #[test]
+    fn test_data_validation_replace_rule() {
+        use crate::{DataValidationRule, ValidationCriteria, ValidationOperator};
+
+        let mut sheet = Sheet::new("Test");
+
+        // Add first rule
+        let rule1 = DataValidationRule::new(
+            "rule1".to_string(),
+            CellRange::new(CellCoord::new(0, 0), CellCoord::new(5, 5)),
+            ValidationCriteria::WholeNumber {
+                operator: ValidationOperator::GreaterThan,
+                value1: 0,
+                value2: None,
+            },
+        );
+
+        sheet.add_data_validation(rule1);
+        assert_eq!(sheet.data_validation.len(), 1);
+
+        // Add another rule with same ID (should replace)
+        let rule2 = DataValidationRule::new(
+            "rule1".to_string(),
+            CellRange::new(CellCoord::new(0, 0), CellCoord::new(10, 10)),
+            ValidationCriteria::WholeNumber {
+                operator: ValidationOperator::LessThan,
+                value1: 100,
+                value2: None,
+            },
+        );
+
+        sheet.add_data_validation(rule2);
+        assert_eq!(sheet.data_validation.len(), 1);
+
+        // Verify the rule was replaced by checking the range
+        let rule = &sheet.data_validation[0];
+        assert_eq!(rule.range.end, CellCoord::new(10, 10));
     }
 }

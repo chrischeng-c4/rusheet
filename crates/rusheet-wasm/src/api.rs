@@ -1,6 +1,8 @@
 use rusheet_core::{
-    CellContent, CellCoord, CellError, CellFormat, CellValue, HorizontalAlign, RusheetError,
-    VerticalAlign, Workbook,
+    CellContent, CellCoord, CellError, CellFormat, CellRange, CellValue,
+    ConditionalFormattingRule, ConditionalRule, HorizontalAlign, RusheetError,
+    VerticalAlign, Workbook, DataValidationRule, ValidationCriteria, ValidationResult,
+    ValidationAlert, ValidationMessage, AlertStyle,
 };
 use rusheet_formula::{extract_references, DependencyGraph};
 use rusheet_history::{
@@ -38,6 +40,16 @@ impl From<RusheetError> for JsRuSheetError {
             code: err.code().to_string(),
             message: err.to_string(),
         }
+    }
+}
+
+impl JsRuSheetError {
+    fn from_error<E: std::fmt::Display>(err: E) -> JsValue {
+        let error = Self {
+            code: "ERROR".to_string(),
+            message: err.to_string(),
+        };
+        serde_wasm_bindgen::to_value(&error).unwrap_or(JsValue::NULL)
     }
 }
 
@@ -150,8 +162,27 @@ impl SpreadsheetEngine {
 
     /// Set cell value (handles both plain values and formulas)
     /// Returns JSON array of affected cell coordinates for re-render
+    /// Or returns JSON error object if validation fails
     #[wasm_bindgen(js_name = setCellValue)]
     pub fn set_cell_value(&mut self, row: u32, col: u32, value: &str) -> String {
+        // Parse input to CellValue first for validation
+        let cell_value = self.parse_input_to_cell_value(value);
+
+        // Check validation
+        let validation_result = self.workbook.active_sheet().validate_cell_value(row, col, &cell_value);
+
+        if let ValidationResult::Invalid(alert) = validation_result {
+            if alert.style == AlertStyle::Stop {
+                // Return error - don't set the value
+                return serde_json::json!({
+                    "error": "validation_failed",
+                    "alert": alert
+                }).to_string();
+            }
+            // Warning/Information: proceed but could log
+        }
+
+        // Proceed with original logic
         let coord = CellCoord::new(row, col);
         let cmd = Box::new(SetCellValueCommand::from_input(coord, value));
 
@@ -273,6 +304,34 @@ impl SpreadsheetEngine {
         }
     }
 
+    /// Helper to parse input to CellValue without setting it
+    fn parse_input_to_cell_value(&self, input: &str) -> CellValue {
+        if input.is_empty() {
+            return CellValue::Empty;
+        }
+
+        // Check if it's a formula
+        if input.starts_with('=') {
+            // For validation purposes, treat formulas as text
+            return CellValue::Text(input.to_string());
+        }
+
+        // Try to parse as number
+        if let Ok(n) = input.parse::<f64>() {
+            return CellValue::Number(n);
+        }
+
+        // Check for boolean
+        match input.to_lowercase().as_str() {
+            "true" => return CellValue::Boolean(true),
+            "false" => return CellValue::Boolean(false),
+            _ => {}
+        }
+
+        // Default to text
+        CellValue::Text(input.to_string())
+    }
+
     /// Get cell data for rendering
     #[wasm_bindgen(js_name = getCellData)]
     pub fn get_cell_data(&self, row: u32, col: u32) -> JsValue {
@@ -280,11 +339,16 @@ impl SpreadsheetEngine {
         let sheet = self.workbook.active_sheet();
 
         let data = if let Some(cell) = sheet.get_cell(coord) {
+            // Apply conditional formatting to get effective format
+            let base_format = &cell.format;
+            let value = cell.content.computed_value();
+            let effective_format = sheet.get_effective_format(row, col, base_format, value);
+
             CellData {
                 value: Some(cell.content.original_input()),
                 display_value: cell.content.display_value(),
                 formula: cell.content.formula_expression().map(String::from),
-                format: CellFormatData::from(&cell.format),
+                format: CellFormatData::from(&effective_format),
                 row,
                 col,
             }
@@ -322,11 +386,16 @@ impl SpreadsheetEngine {
             for col in start_col..=end_col {
                 let coord = CellCoord::new(row, col);
                 if let Some(cell) = sheet.get_cell(coord) {
+                    // Apply conditional formatting to get effective format
+                    let base_format = &cell.format;
+                    let value = cell.content.computed_value();
+                    let effective_format = sheet.get_effective_format(row, col, base_format, value);
+
                     cells.push(CellData {
                         value: Some(cell.content.original_input()),
                         display_value: cell.content.display_value(),
                         formula: cell.content.formula_expression().map(String::from),
-                        format: CellFormatData::from(&cell.format),
+                        format: CellFormatData::from(&effective_format),
                         row,
                         col,
                     });
@@ -795,6 +864,303 @@ impl SpreadsheetEngine {
         serde_json::to_string(&hidden).unwrap_or_else(|_| "[]".to_string())
     }
 
+    // --- Search and Replace ---
+
+    /// Search for cells matching the query
+    ///
+    /// options_json format:
+    /// {
+    ///   "query": "search text",
+    ///   "match_case": false,
+    ///   "match_entire_cell": false,
+    ///   "use_regex": false,
+    ///   "search_formulas": false,
+    ///   "sheet_indices": null  // or [0, 1] to search specific sheets
+    /// }
+    ///
+    /// Returns JSON array of SearchResult
+    #[wasm_bindgen]
+    pub fn search(&self, options_json: &str) -> Result<String, JsValue> {
+        let options: rusheet_core::SearchOptions = serde_json::from_str(options_json)
+            .map_err(JsRuSheetError::from_error)?;
+
+        let results = rusheet_core::SearchEngine::search(&self.workbook, &options)
+            .map_err(JsRuSheetError::from_error)?;
+
+        serde_json::to_string(&results)
+            .map_err(JsRuSheetError::from_error)
+    }
+
+    /// Replace text in cells matching the query
+    ///
+    /// options_json format:
+    /// {
+    ///   "query": "search text",
+    ///   "replacement": "new text",
+    ///   "match_case": false,
+    ///   "match_entire_cell": false,
+    ///   "use_regex": false,
+    ///   "search_formulas": false,
+    ///   "sheet_indices": null
+    /// }
+    ///
+    /// Returns JSON array of replaced cells (SearchResult format)
+    #[wasm_bindgen]
+    pub fn replace(&mut self, options_json: &str) -> Result<String, JsValue> {
+        let options: rusheet_core::ReplaceOptions = serde_json::from_str(options_json)
+            .map_err(JsRuSheetError::from_error)?;
+
+        let results = rusheet_core::SearchEngine::replace(&mut self.workbook, &options)
+            .map_err(JsRuSheetError::from_error)?;
+
+        serde_json::to_string(&results)
+            .map_err(JsRuSheetError::from_error)
+    }
+
+    /// Simple search in current sheet only
+    #[wasm_bindgen(js_name = searchCurrentSheet)]
+    pub fn search_current_sheet(&self, query: &str, match_case: bool) -> Result<String, JsValue> {
+        let options = rusheet_core::SearchOptions {
+            query: query.to_string(),
+            match_case,
+            match_entire_cell: false,
+            use_regex: false,
+            search_formulas: false,
+            sheet_indices: Some(vec![self.workbook.active_sheet_index]),
+        };
+
+        let results = rusheet_core::SearchEngine::search(&self.workbook, &options)
+            .map_err(JsRuSheetError::from_error)?;
+
+        serde_json::to_string(&results)
+            .map_err(JsRuSheetError::from_error)
+    }
+
+    // --- Conditional Formatting ---
+
+    /// Add a conditional formatting rule
+    ///
+    /// rule_json format:
+    /// {
+    ///   "range": { "start_row": 0, "start_col": 0, "end_row": 10, "end_col": 5 },
+    ///   "rule": {
+    ///     "type": "value_based",
+    ///     "operator": "greater_than",
+    ///     "value1": 50,
+    ///     "format": { "background_color": { "r": 255, "g": 0, "b": 0, "a": 255 } }
+    ///   },
+    ///   "priority": 0,
+    ///   "enabled": true
+    /// }
+    ///
+    /// Returns the generated rule ID
+    #[wasm_bindgen(js_name = addConditionalFormatting)]
+    pub fn add_conditional_formatting(&mut self, rule_json: &str) -> Result<String, JsValue> {
+        #[derive(Deserialize)]
+        struct RuleInput {
+            range: CellRange,
+            rule: ConditionalRule,
+            #[serde(default)]
+            priority: i32,
+            #[serde(default = "default_true")]
+            enabled: bool,
+        }
+        fn default_true() -> bool { true }
+
+        let input: RuleInput = serde_json::from_str(rule_json)
+            .map_err(JsRuSheetError::from_error)?;
+
+        let rule_id = uuid::Uuid::new_v4().to_string();
+        let rule = ConditionalFormattingRule {
+            id: rule_id.clone(),
+            range: input.range,
+            rule: input.rule,
+            priority: input.priority,
+            enabled: input.enabled,
+        };
+
+        self.workbook.active_sheet_mut().add_conditional_formatting(rule);
+
+        Ok(rule_id)
+    }
+
+    /// Remove a conditional formatting rule by ID
+    #[wasm_bindgen(js_name = removeConditionalFormatting)]
+    pub fn remove_conditional_formatting(&mut self, rule_id: &str) -> bool {
+        self.workbook.active_sheet_mut().remove_conditional_formatting(rule_id)
+    }
+
+    /// Get all conditional formatting rules for the active sheet
+    #[wasm_bindgen(js_name = getConditionalFormattingRules)]
+    pub fn get_conditional_formatting_rules(&self) -> Result<String, JsValue> {
+        let rules = &self.workbook.active_sheet().conditional_formatting;
+        serde_json::to_string(rules)
+            .map_err(JsRuSheetError::from_error)
+    }
+
+    /// Update an existing conditional formatting rule
+    #[wasm_bindgen(js_name = updateConditionalFormatting)]
+    pub fn update_conditional_formatting(&mut self, rule_id: &str, rule_json: &str) -> Result<bool, JsValue> {
+        #[derive(Deserialize)]
+        struct UpdateInput {
+            range: Option<CellRange>,
+            rule: Option<ConditionalRule>,
+            priority: Option<i32>,
+            enabled: Option<bool>,
+        }
+
+        let input: UpdateInput = serde_json::from_str(rule_json)
+            .map_err(JsRuSheetError::from_error)?;
+
+        let sheet = self.workbook.active_sheet_mut();
+        if let Some(existing) = sheet.conditional_formatting.iter_mut().find(|r| r.id == rule_id) {
+            if let Some(range) = input.range { existing.range = range; }
+            if let Some(rule) = input.rule { existing.rule = rule; }
+            if let Some(priority) = input.priority { existing.priority = priority; }
+            if let Some(enabled) = input.enabled { existing.enabled = enabled; }
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Clear all conditional formatting rules from active sheet
+    #[wasm_bindgen(js_name = clearConditionalFormatting)]
+    pub fn clear_conditional_formatting(&mut self) {
+        self.workbook.active_sheet_mut().conditional_formatting.clear();
+    }
+
+    // --- Data Validation ---
+
+    /// Add a data validation rule
+    ///
+    /// rule_json format:
+    /// {
+    ///   "range": { "start_row": 0, "start_col": 0, "end_row": 10, "end_col": 0 },
+    ///   "criteria": {
+    ///     "type": "list",
+    ///     "source": { "type": "values", "items": ["Yes", "No", "Maybe"] },
+    ///     "show_dropdown": true
+    ///   },
+    ///   "allow_blank": true,
+    ///   "error_alert": {
+    ///     "style": "stop",
+    ///     "title": "Invalid Input",
+    ///     "message": "Please select from the list"
+    ///   }
+    /// }
+    ///
+    /// Returns the generated rule ID
+    #[wasm_bindgen(js_name = addDataValidation)]
+    pub fn add_data_validation(&mut self, rule_json: &str) -> Result<String, JsValue> {
+        #[derive(Deserialize)]
+        struct RuleInput {
+            range: CellRange,
+            criteria: ValidationCriteria,
+            #[serde(default = "default_true")]
+            allow_blank: bool,
+            #[serde(default)]
+            input_message: Option<ValidationMessage>,
+            #[serde(default)]
+            error_alert: ValidationAlert,
+            #[serde(default = "default_true")]
+            enabled: bool,
+        }
+        fn default_true() -> bool { true }
+
+        let input: RuleInput = serde_json::from_str(rule_json)
+            .map_err(JsRuSheetError::from_error)?;
+
+        let rule_id = uuid::Uuid::new_v4().to_string();
+        let rule = DataValidationRule {
+            id: rule_id.clone(),
+            range: input.range,
+            criteria: input.criteria,
+            allow_blank: input.allow_blank,
+            input_message: input.input_message,
+            error_alert: input.error_alert,
+            enabled: input.enabled,
+        };
+
+        self.workbook.active_sheet_mut().add_data_validation(rule);
+
+        Ok(rule_id)
+    }
+
+    /// Remove a data validation rule by ID
+    #[wasm_bindgen(js_name = removeDataValidation)]
+    pub fn remove_data_validation(&mut self, rule_id: &str) -> bool {
+        self.workbook.active_sheet_mut().remove_data_validation(rule_id)
+    }
+
+    /// Get all data validation rules for the active sheet
+    #[wasm_bindgen(js_name = getDataValidationRules)]
+    pub fn get_data_validation_rules(&self) -> Result<String, JsValue> {
+        let rules = self.workbook.active_sheet().get_data_validation_rules();
+        serde_json::to_string(rules)
+            .map_err(JsRuSheetError::from_error)
+    }
+
+    /// Get dropdown items for a cell (if it has list validation)
+    #[wasm_bindgen(js_name = getCellDropdownItems)]
+    pub fn get_cell_dropdown_items(&self, row: u32, col: u32) -> Result<JsValue, JsValue> {
+        let items = self.workbook.active_sheet().get_cell_dropdown_items(row, col);
+        match items {
+            Some(items) => {
+                let js_array = js_sys::Array::new();
+                for item in items {
+                    js_array.push(&JsValue::from_str(&item));
+                }
+                Ok(js_array.into())
+            }
+            None => Ok(JsValue::NULL),
+        }
+    }
+
+    /// Validate a value against the cell's validation rule
+    /// Returns: { "valid": true } or { "valid": false, "alert": { "style": "stop", "title": ..., "message": ... } }
+    #[wasm_bindgen(js_name = validateCellValue)]
+    pub fn validate_cell_value(&self, row: u32, col: u32, value: &str) -> Result<String, JsValue> {
+        let cell_value = self.parse_input_to_cell_value(value);
+        let result = self.workbook.active_sheet().validate_cell_value(row, col, &cell_value);
+
+        #[derive(Serialize)]
+        struct ValidationResponse {
+            valid: bool,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            alert: Option<ValidationAlert>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            needs_context: Option<bool>,
+        }
+
+        let response = match result {
+            ValidationResult::Valid => ValidationResponse {
+                valid: true,
+                alert: None,
+                needs_context: None,
+            },
+            ValidationResult::Invalid(alert) => ValidationResponse {
+                valid: false,
+                alert: Some(alert),
+                needs_context: None,
+            },
+            ValidationResult::NeedsContext => ValidationResponse {
+                valid: true,  // Allow for now, full validation needs evaluator
+                alert: None,
+                needs_context: Some(true),
+            },
+        };
+
+        serde_json::to_string(&response)
+            .map_err(JsRuSheetError::from_error)
+    }
+
+    /// Clear all data validation rules from active sheet
+    #[wasm_bindgen(js_name = clearDataValidation)]
+    pub fn clear_data_validation(&mut self) {
+        self.workbook.active_sheet_mut().data_validation.clear();
+    }
+
     // --- Serialization ---
 
     /// Serialize workbook to JSON
@@ -902,22 +1268,27 @@ impl SpreadsheetEngine {
                         _ => f64::NAN,
                     };
 
-                    // Pack format flags
-                    let h_align = match cell.format.horizontal_align {
+                    // Apply conditional formatting to get effective format
+                    let base_format = &cell.format;
+                    let value = cell.content.computed_value();
+                    let effective_format = sheet.get_effective_format(row, col, base_format, value);
+
+                    // Pack format flags using effective format
+                    let h_align = match effective_format.horizontal_align {
                         HorizontalAlign::Left => 0,
                         HorizontalAlign::Center => 1,
                         HorizontalAlign::Right => 2,
                     };
-                    let v_align = match cell.format.vertical_align {
+                    let v_align = match effective_format.vertical_align {
                         VerticalAlign::Middle => 0,
                         VerticalAlign::Top => 1,
                         VerticalAlign::Bottom => 2,
                     };
                     let format_flags = pack_format(
-                        cell.format.bold,
-                        cell.format.italic,
-                        cell.format.underline,
-                        cell.format.font_size,
+                        effective_format.bold,
+                        effective_format.italic,
+                        effective_format.underline,
+                        effective_format.font_size,
                         h_align,
                         v_align,
                     );
@@ -1155,17 +1526,22 @@ mod bug_fixes {
         assert_eq!(cell.content.original_input(), "=A1+B1");
     }
 
-    // Helper function to get cell data
+    // Helper function to get cell data with conditional formatting applied
     fn get_cell_as_data(engine: &super::SpreadsheetEngine, row: u32, col: u32) -> super::CellData {
         let coord = CellCoord::new(row, col);
         let sheet = engine.workbook.active_sheet();
 
         if let Some(cell) = sheet.get_cell(coord) {
+            // Apply conditional formatting to get effective format
+            let base_format = &cell.format;
+            let value = cell.content.computed_value();
+            let effective_format = sheet.get_effective_format(row, col, base_format, value);
+
             super::CellData {
                 value: Some(cell.content.original_input()),
                 display_value: cell.content.display_value(),
                 formula: cell.content.formula_expression().map(String::from),
-                format: super::CellFormatData::from(&cell.format),
+                format: super::CellFormatData::from(&effective_format),
                 row,
                 col,
             }
@@ -1310,5 +1686,179 @@ mod bug_fixes {
         assert_eq!(data.format.bold, true);
         assert_eq!(data.format.text_color, Some("#ff0000".to_string()));
         assert_eq!(data.format.background_color, Some("#ffff00".to_string()));
+    }
+
+    #[test]
+    fn test_data_validation_integration() {
+        use rusheet_core::{DataValidationRule, ValidationCriteria, ValidationAlert, AlertStyle, ListSource, CellRange, CellCoord};
+
+        let mut engine = super::SpreadsheetEngine::new();
+
+        // Add a list validation rule for column A (rows 0-10) directly
+        let rule = DataValidationRule {
+            id: "test-validation".to_string(),
+            range: CellRange::new(CellCoord::new(0, 0), CellCoord::new(10, 0)),
+            criteria: ValidationCriteria::List {
+                source: ListSource::Values {
+                    items: vec!["Yes".into(), "No".into(), "Maybe".into()]
+                },
+                show_dropdown: true,
+            },
+            allow_blank: true,
+            input_message: None,
+            error_alert: ValidationAlert {
+                style: AlertStyle::Stop,
+                title: Some("Invalid Input".into()),
+                message: Some("Please select from the list".into()),
+            },
+            enabled: true,
+        };
+
+        engine.workbook.active_sheet_mut().add_data_validation(rule);
+
+        // Test valid value - should succeed
+        let result = engine.set_cell_value(0, 0, "Yes");
+        let coords: Result<Vec<[u32; 2]>, _> = serde_json::from_str(&result);
+        assert!(coords.is_ok(), "Setting valid value should succeed");
+
+        // Verify cell was actually set
+        let cell_data = get_cell_as_data(&engine, 0, 0);
+        assert_eq!(cell_data.value, Some("Yes".to_string()));
+
+        // Test invalid value - should fail
+        let result = engine.set_cell_value(1, 0, "Invalid");
+        let error: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(error["error"], "validation_failed", "Invalid value should be rejected");
+        assert_eq!(error["alert"]["style"], "stop");
+
+        // Verify cell was NOT set (should be empty)
+        let cell_data = get_cell_as_data(&engine, 1, 0);
+        assert_eq!(cell_data.value, None, "Invalid value should not be set");
+
+        // Test that the rule exists
+        let rules = engine.workbook.active_sheet().get_data_validation_rules();
+        assert_eq!(rules.len(), 1, "Should have one validation rule");
+
+        // Test removeDataValidation
+        let removed = engine.workbook.active_sheet_mut().remove_data_validation("test-validation");
+        assert!(removed, "Rule should be removed");
+
+        // After removal, invalid value should be accepted
+        let result = engine.set_cell_value(2, 0, "Invalid");
+        let coords: Result<Vec<[u32; 2]>, _> = serde_json::from_str(&result);
+        assert!(coords.is_ok(), "After rule removal, any value should be accepted");
+
+        let cell_data = get_cell_as_data(&engine, 2, 0);
+        assert_eq!(cell_data.value, Some("Invalid".to_string()));
+    }
+
+    #[test]
+    fn test_data_validation_number_range() {
+        use rusheet_core::{DataValidationRule, ValidationCriteria, ValidationAlert, AlertStyle, ValidationOperator, CellRange, CellCoord};
+
+        let mut engine = super::SpreadsheetEngine::new();
+
+        // Add a decimal validation rule (between 0 and 100) directly
+        let rule = DataValidationRule {
+            id: "test-number-validation".to_string(),
+            range: CellRange::new(CellCoord::new(0, 0), CellCoord::new(10, 0)),
+            criteria: ValidationCriteria::Decimal {
+                operator: ValidationOperator::Between,
+                value1: 0.0,
+                value2: Some(100.0),
+            },
+            allow_blank: false,
+            input_message: None,
+            error_alert: ValidationAlert {
+                style: AlertStyle::Stop,
+                title: Some("Out of Range".into()),
+                message: Some("Value must be between 0 and 100".into()),
+            },
+            enabled: true,
+        };
+
+        engine.workbook.active_sheet_mut().add_data_validation(rule);
+
+        // Test valid values
+        let result = engine.set_cell_value(0, 0, "50");
+        assert!(serde_json::from_str::<Vec<[u32; 2]>>(&result).is_ok());
+        let cell_data = get_cell_as_data(&engine, 0, 0);
+        assert_eq!(cell_data.display_value, "50");
+
+        let result = engine.set_cell_value(1, 0, "0");
+        assert!(serde_json::from_str::<Vec<[u32; 2]>>(&result).is_ok());
+
+        let result = engine.set_cell_value(2, 0, "100");
+        assert!(serde_json::from_str::<Vec<[u32; 2]>>(&result).is_ok());
+
+        // Test invalid values
+        let result = engine.set_cell_value(3, 0, "-1");
+        let error: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(error["error"], "validation_failed");
+
+        let result = engine.set_cell_value(4, 0, "101");
+        let error: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(error["error"], "validation_failed");
+
+        // Test blank (should fail because allow_blank is false)
+        let result = engine.set_cell_value(5, 0, "");
+        let error: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(error["error"], "validation_failed");
+    }
+
+    #[test]
+    fn test_conditional_formatting_integration() {
+        use rusheet_core::{CellRange, Color, ComparisonOperator, ConditionalFormat, ConditionalFormattingRule, ConditionalRule};
+
+        let mut engine = super::SpreadsheetEngine::new();
+
+        // Set up some cells with values
+        engine.set_cell_value(0, 0, "100");
+        engine.set_cell_value(1, 0, "50");
+        engine.set_cell_value(2, 0, "25");
+
+        // Add a conditional formatting rule directly: values > 50 get red background
+        let rule = ConditionalFormattingRule {
+            id: "test-rule".to_string(),
+            range: CellRange::new(CellCoord::new(0, 0), CellCoord::new(10, 5)),
+            rule: ConditionalRule::ValueBased {
+                operator: ComparisonOperator::GreaterThan,
+                value1: 50.0,
+                value2: None,
+                format: ConditionalFormat {
+                    background_color: Some(Color { r: 255, g: 0, b: 0, a: 255 }),
+                    ..Default::default()
+                },
+            },
+            priority: 0,
+            enabled: true,
+        };
+
+        engine.workbook.active_sheet_mut().add_conditional_formatting(rule);
+
+        // Verify conditional formatting is applied
+        let data_100 = get_cell_as_data(&engine, 0, 0);
+        assert_eq!(data_100.display_value, "100");
+        assert_eq!(data_100.format.background_color, Some("#ff0000".to_string()),
+                   "Cell with value 100 should have red background");
+
+        let data_50 = get_cell_as_data(&engine, 1, 0);
+        assert_eq!(data_50.display_value, "50");
+        assert_eq!(data_50.format.background_color, None,
+                   "Cell with value 50 should not have conditional formatting");
+
+        let data_25 = get_cell_as_data(&engine, 2, 0);
+        assert_eq!(data_25.display_value, "25");
+        assert_eq!(data_25.format.background_color, None,
+                   "Cell with value 25 should not have conditional formatting");
+
+        // Remove the rule
+        let removed = engine.workbook.active_sheet_mut().remove_conditional_formatting("test-rule");
+        assert!(removed, "Rule should be successfully removed");
+
+        // Verify conditional formatting is no longer applied
+        let data_after_remove = get_cell_as_data(&engine, 0, 0);
+        assert_eq!(data_after_remove.format.background_color, None,
+                   "After rule removal, cell should not have conditional formatting");
     }
 }
