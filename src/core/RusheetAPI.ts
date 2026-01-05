@@ -363,7 +363,7 @@ export class RusheetAPI {
 
     // Clear existing data if requested
     if (clearExisting) {
-      const maxRows = Math.max(data.length, 100);
+      const maxRows = Math.max(data.length, 1000);
       const maxCols = Math.max(data[0]?.length ?? 0, 26);
       WasmBridge.clearRange(0, 0, maxRows, maxCols);
     }
@@ -524,7 +524,7 @@ export class RusheetAPI {
 
     // Clear existing data if requested
     if (clearExisting) {
-      const maxRows = Math.max(data.length, 100);
+      const maxRows = Math.max(data.length, 1000);
       const maxCols = Math.max(data[0]?.length ?? 0, 26);
       WasmBridge.clearRange(0, 0, maxRows, maxCols);
     }

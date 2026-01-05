@@ -13,8 +13,8 @@ export class GridController {
   private activeCell: CellPosition = { row: 0, col: 0 };
   private selectionRange: CellRange | null = null;
   private isDragging = false;
-  private maxRows: number = 2000;
-  private maxCols: number = 100;
+  private maxRows: number = 1000;
+  private maxCols: number = 26;
 
   // Callbacks
   private onActiveCellChange?: (pos: CellPosition) => void;

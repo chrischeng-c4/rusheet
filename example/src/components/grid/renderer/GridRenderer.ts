@@ -61,6 +61,17 @@ export class GridRenderer {
     this.drawSelection(activeCell, scrollX, scrollY);
   }
 
+  private colToLetter(col: number): string {
+    let result = '';
+    let num = col;
+    while (num >= 0) {
+      result = String.fromCharCode(65 + (num % 26)) + result;
+      num = Math.floor(num / 26) - 1;
+      if (num < 0) break;
+    }
+    return result;
+  }
+
   private drawGridAndContent(
     startRow: number, endRow: number, 
     startCol: number, endCol: number,
@@ -196,7 +207,7 @@ export class GridRenderer {
     // Column Headers (A, B, C...)
     for (let col = startCol; col <= endCol; col++) {
       const x = this.theme.headerWidth + col * this.theme.defaultColWidth - scrollX + this.theme.defaultColWidth / 2;
-      const letter = String.fromCharCode(65 + (col % 26)); // Simplified
+      const letter = this.colToLetter(col);
       this.ctx.fillText(letter, x, this.theme.headerHeight / 2);
       
       // Separator

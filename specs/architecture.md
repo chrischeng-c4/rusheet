@@ -10,6 +10,7 @@ graph TD
         UI[UI Components]
         Canvas[Canvas Renderer]
         Bridge[WasmBridge.ts]
+        Yjs[Yjs / y-websocket]
     end
 
     subgraph Backend [Rust / WASM]
@@ -17,6 +18,12 @@ graph TD
         History[rusheet-history]
         Core[rusheet-core]
         Formula[rusheet-formula]
+    end
+
+    subgraph Server [Collaboration Server]
+        Axum[Axum HTTP/WS]
+        Yrs[Yrs (Rust CRDT)]
+        DB[(PostgreSQL)]
     end
 
     UI -->|Events| Bridge
@@ -27,6 +34,10 @@ graph TD
     History -->|Mutates| Core
     Core -->|Uses| Formula
     Formula -->|Reads| Core
+
+    Yjs <-->|WebSocket| Axum
+    Axum <-->|Sync| Yrs
+    Yrs <-->|Persist| DB
 ```
 
 ## Component Breakdown
@@ -38,6 +49,7 @@ graph TD
     *   Rendering the grid using HTML Canvas for performance.
     *   Managing the React application state.
     *   **`core/WasmBridge.ts`**: The strict boundary layer. It handles lazy loading of the WASM module and marshals data between JS objects and JSON strings required by the Rust backend.
+    *   **Collaboration**: Uses `yjs` and `y-websocket` to sync document state with the server.
 
 ### 2. WASM Facade (rusheet-wasm)
 *   **Path**: `crates/rusheet-wasm`
@@ -68,6 +80,39 @@ graph TD
     *   **Lexer & Parser**: Converts string formulas (e.g., `=SUM(A1:B2)`) into an AST.
     *   **Evaluator**: Executes the AST against the `Workbook` data.
     *   **Dependency Graph**: Tracks cell dependencies to efficiently determine which cells need recalculation when a value changes.
+
+### 6. Collaboration Server (rusheet-server)
+*   **Path**: `crates/rusheet-server`
+*   **Role**: A versatile collaboration engine supporting multiple integration patterns.
+*   **Architecture**:
+    *   **Core**: Axum (HTTP/WS) + Yrs (CRDT Sync).
+    *   **Storage Abstraction**: Defines a `DocumentStorage` trait to decouple logic from persistence.
+    *   **Backends**:
+        *   **PostgreSQL**: For turnkey solutions.
+        *   **Webhook (HTTP)**: For API-based integration (BYOB - Bring Your Own Backend).
+
+## Integration Levels
+
+RuSheet is designed to function independently at three different levels:
+
+### Level 1: Client-Only Mode (SDK)
+*   **Use Case**: Simple UI component, manual data handling.
+*   **Architecture**: React Component <-> WASM. No Server required.
+*   **Data Flow**: `Props (in)` -> `Events (out)`.
+
+### Level 2: Collaboration Engine (Webhook Mode)
+*   **Use Case**: Adding real-time collaboration to an existing app.
+*   **Architecture**: Client <-> Rusheet Server (Stateless) <-> **User API**.
+*   **Mechanism**:
+    *   Server acts as a sync engine.
+    *   Triggers `LOAD` webhook on connection.
+    *   Triggers `SAVE` webhook on document update.
+    *   No internal DB required.
+
+### Level 3: Turnkey Solution (Full Stack)
+*   **Use Case**: Standalone apps, internal tools.
+*   **Architecture**: Client <-> Rusheet Server <-> PostgreSQL.
+*   **Mechanism**: Server manages data persistence directly in its own database.
 
 ## Data Flow Principles
 1.  **Unidirectional Updates**: The UI never modifies the core state directly. It requests changes via the `WasmBridge`.

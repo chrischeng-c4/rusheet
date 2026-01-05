@@ -1,6 +1,6 @@
 # RuSheet Development Roadmap
 
-**Last Updated:** 2026-01-04
+**Last Updated:** 2026-01-05
 
 This document outlines all pending work, known issues, and future features for RuSheet.
 
@@ -29,8 +29,8 @@ This document outlines all pending work, known issues, and future features for R
 | 排序（單欄/多欄）| P1 | ✅ 已完成 |
 | 合併儲存格 | P1 | ✅ 已完成 |
 | 篩選/自動篩選 | P1 | ✅ 已完成 |
-| 條件格式 | P2 | ❌ |
-| 資料驗證（下拉選單）| P2 | ❌ |
+| 條件格式 | P1 | ❌ |
+| 資料驗證（下拉選單）| P1 | ❌ |
 | 樞紐分析表 | P3 | ❌ |
 | 圖表 | P3 | ❌ |
 
@@ -56,7 +56,7 @@ This document outlines all pending work, known issues, and future features for R
 | 游標追蹤（顯示其他人位置）| P1 | ✅ 已完成 |
 | 評論系統 | P2 | ❌ |
 | 版本歷史 | P2 | ❌ |
-| 權限控制（查看/編輯）| P2 | ❌ |
+| 權限控制（查看/編輯）| P1 | ❌ |
 
 ---
 
@@ -65,28 +65,11 @@ This document outlines all pending work, known issues, and future features for R
 ### Documentation & Packaging (Critical)
 
 - [x] **README.md** - Project overview, quick start, badges ✅ (2025-12-30)
-  - Installation instructions (npm, cargo)
-  - Basic usage examples
-  - Links to documentation
-  - React component example
-
 - [x] **LICENSE file** - MIT license file in repository root ✅ (2025-12-30)
-
 - [x] **package.json metadata** - Complete npm package info ✅ (2025-12-30)
-  - [x] `description` field
-  - [x] `author` field
-  - [x] `repository` URL
-  - [x] `homepage` (docs URL)
-  - [x] `bugs` (GitHub issues URL)
-  - [x] `keywords` (spreadsheet, wasm, rust, formula, etc.)
-
 - [x] **CONTRIBUTING.md** - Contribution guidelines ✅ (2025-12-30)
-  - Development setup
-  - Code style
-  - PR process
-  - Issue templates
 
-- [ ] **CHANGELOG.md** - Release notes history (skipped - rapid development phase)
+- [ ] **CHANGELOG.md** - Release notes history
   - Follow Keep a Changelog format
   - Semantic versioning
 
@@ -103,10 +86,7 @@ This document outlines all pending work, known issues, and future features for R
   - Use case: Server-side formula calculation
 
 - [x] **React Component Wrapper** - `<RuSheet />` component ✅ (2025-12-30)
-  - Props: `initialData`, `onChange`, `onSelectionChange`, `collaboration`, etc.
-  - `RuSheetRef` API for imperative control (getCellData, setCellValue, etc.)
-  - `useRuSheet()` hook for easier ref management
-  - Example: `examples/react-basic.tsx`
+  - `examples/react-basic.tsx` updated with latest API
 
 - [ ] **Vue Component Wrapper** - `<RuSheet />` component
   - Similar API to React wrapper
@@ -116,26 +96,30 @@ This document outlines all pending work, known issues, and future features for R
   - WebSocket connection helper
   - Type-safe API calls
 
-- [ ] **Storybook / Playground**
-  - Interactive component demos
-  - API exploration
-
-- [ ] **CodeSandbox / StackBlitz Examples**
-  - One-click runnable examples
-  - Different framework integrations
-
 ### Package Publishing
 
 - [ ] **Publish to npm** - `rusheet` package
-  - Build pipeline for ESM/CJS/UMD
-  - Type definitions included
-  - README on npm page
+- [ ] **Publish to crates.io** - Core crates
 
-- [ ] **Publish to crates.io**
-  - [ ] `rusheet-core`
-  - [ ] `rusheet-formula`
-  - [ ] `rusheet-history`
-  - [ ] `rusheet-wasm` (if useful standalone)
+---
+
+## Recent Accomplishments (Jan 2026)
+
+- [x] **Default Grid Dimensions** ✅ (2026-01-05)
+  - Updated default sheet size to **1000 rows** and **26 columns (A-Z)** to match Google Sheets defaults.
+  - Aligned WASM API, Frontend Controller, and CSV import logic.
+
+- [x] **Column Header Rendering Fix** ✅ (2026-01-05)
+  - Fixed visual bug where columns beyond 'Z' (e.g., AA, AB) were rendered incorrectly.
+  - Implemented proper base-26 column lettering logic in example renderer.
+
+- [x] **Structured Error Handling** ✅ (2026-01-04)
+  - Created `RuSheetError` enum in Rust core.
+  - Implemented `JsRuSheetError` in WASM bridge.
+
+- [x] **Documentation & Spec Sync** ✅ (2026-01-05)
+  - Updated `docs/guide/getting-started.md` to use the modern React component API.
+  - Updated `specs/architecture.md` to include the Collaboration Server (Axum/Yjs).
 
 ---
 
@@ -143,392 +127,51 @@ This document outlines all pending work, known issues, and future features for R
 
 ### P0: Critical (Blocks Production Use)
 
+- [x] **Real-time Collaboration Server** ✅ (2025-12-30)
+  - Axum + Yjs/yrs + PostgreSQL
+  - WebSocket sync & Cursor tracking
+
 - [x] **Event/Callback System** ✅ (2025-12-30)
 - [x] **Row/Column Insert/Delete** ✅ (2025-12-30)
-- [x] **Real-time Collaboration Server** ✅ (2025-12-30)
+- [x] **CSV/XLSX Import/Export** ✅ (2025-12-30)
 
-- [x] **CSV Import/Export** ✅ (2025-12-30)
-  - `exportCSV()`, `importCSV()`, `downloadCSV()`, `importCSVFile()`
-  - TypeScript 層用 papaparse 實現
-  - 支援自訂分隔符、範圍匯出、位移匯入
+### P1: High Priority (Essential Features)
 
-- [x] **Structured Error Handling** ✅ (2026-01-04)
-  - Created `RuSheetError` enum in Rust core.
-  - Implemented `JsRuSheetError` in WASM bridge for structured error return.
-  - Updated `RusheetAPI.ts` to handle and log errors with codes.
+- [ ] **Authentication & Permissions**
+  - **Goal**: Secure the collaboration server.
+  - JWT Auth
+  - Workbook ownership and sharing permissions (Public/Private/Shared).
 
-### P1: High Priority (核心功能補齊)
+- [ ] **Data Validation**
+  - **Goal**: Ensure data integrity.
+  - Dropdown lists (from range or list).
+  - Number/Date constraints.
 
-#### 公式功能
-- [x] **Cross-Sheet References** ✅ (2025-12-30)
-  - `Sheet2!A1`, `'Sheet Name'!A1:B5` 語法解析
-  - `CrossSheetEvaluator` 支援跨工作表取值
-  - `evaluate_formula_cross_sheet()` API
-  - 84 Rust formula tests + 121 TypeScript tests passing
-
-- [x] **Conditional Functions** ✅ (2025-12-30)
-  - COUNTIF, SUMIF, AVERAGEIF
-  - Criteria 解析：`>`, `<`, `>=`, `<=`, `<>`, `=` 及純值匹配
-  - 支援可選的 sum_range/average_range 參數
-  - 77 Rust tests passing
-
-- [x] **Date/Time Functions** ✅ (2025-12-30)
-  - DATE, TIME, NOW, TODAY, DATEDIF
-  - YEAR, MONTH, DAY, HOUR, MINUTE, SECOND
-  - Excel-compatible serial date format (day 1 = Jan 1, 1900)
-  - 14 Rust tests passing
-
-#### 資料功能
-- [x] **Sorting** ✅ (2025-12-30)
-  - 單欄排序（升序/降序）
-  - `sortRange()` API in Rust core, WASM, and TypeScript
-  - Undo/redo 支援
-  - 7 unit tests passing
-
-- [x] **Cell Merging** ✅ (2025-12-30)
-  - `mergeCells()`, `unmergeCells()` API in Rust core, WASM, TypeScript
-  - `getMergedRanges()`, `getMergeInfo()`, `isMergedSlave()` query APIs
-  - Undo/redo 支援 (MergeCellsCommand, UnmergeCellsCommand)
-  - Canvas 渲染：合併區域背景、跳過 slave cells、選取區覆蓋整個合併範圍
-  - 17 unit tests passing
-
-- [x] **Filtering / AutoFilter** ✅ (2025-12-31)
-  - 自動篩選下拉選單
-  - 多欄篩選（AND 邏輯）
-  - Undo/redo 支援
-  - 20 unit tests passing
-
-#### 匯入匯出
-- [x] **XLSX Import/Export** ✅ (2025-12-30)
-  - `exportXLSX()`, `importXLSX()`, `downloadXLSX()`, `importXLSXFile()`
-  - TypeScript 層用 SheetJS (xlsx) 實現
-  - 支援多工作表選擇、範圍匯出
-
-#### 協作功能
-- [x] **Cursor Tracking** ✅ (2025-12-31)
-  - 顯示其他協作者的游標位置
-  - 用戶顏色標識 + 名稱標籤
-  - 支援合併儲存格
+- [ ] **Conditional Formatting**
+  - **Goal**: Visual data analysis.
+  - Highlight cells based on value/formula.
+  - Color scales.
 
 ### P2: Medium Priority (Feature Completeness)
 
-#### 公式
-- [~] **Advanced Lookup Functions**
-  - [~] MATCH (Implementation in progress)
-  - [ ] INDEX
-  - [ ] OFFSET
-  - [ ] INDIRECT
-
-- [ ] **Array Formulas**
-  - ARRAYFORMULA 支援
-  - 動態陣列溢出
-
+#### Formula Engine
+- [ ] **Array Formulas** (ARRAYFORMULA support)
 - [ ] **Named Ranges**
-  - 創建/編輯命名範圍
-  - 在公式中使用
+- [ ] **Text Functions** (FIND, SEARCH, SUBSTITUTE)
+- [ ] **Advanced Lookups** (INDEX, OFFSET)
 
-- [ ] **Text Functions**
-  - FIND, SEARCH, SUBSTITUTE, TEXT
-
-#### 資料
-- [ ] **Conditional Formatting**
-  - 規則型儲存格樣式
-  - 資料條、色階、圖示集
-
-- [ ] **Data Validation**
-  - 下拉選單、數字範圍
-  - 自訂公式驗證
-
-#### 編輯
-- [ ] **Find & Replace**
-  - 跨工作表搜尋
-  - 正則表達式支援
-
-- [ ] **Special Paste**
-  - 僅貼上值、僅格式
-  - 轉置貼上
-
-- [ ] **AutoFill**
-  - 拖曳填充
-  - 序列識別（日期、數字）
-
-#### 協作
-- [ ] **Comments System**
-  - 儲存格評論、回覆
-  - 評論指示器
-
-- [ ] **Version History**
-  - 查看歷史版本
-  - 回滾功能
-
-- [ ] **Permission Control**
-  - 查看/編輯權限
-  - 工作表保護
-
-#### 匯出
-- [x] **XLSX Export** ✅ (2025-12-30)
-  - TypeScript 層用 SheetJS (xlsx) 實現（非 Rust）
-  - 基本格式匯出
+#### Editing & UI
+- [ ] **Find & Replace** (Cross-sheet, Regex)
+- [ ] **Special Paste** (Values only, Transpose)
+- [ ] **AutoFill** (Drag handle logic)
+- [ ] **Comments System** (Cell-based comments)
 
 ### P3: Low Priority (Nice to Have)
 
 - [ ] **Pivot Tables**
-  - 基本樞紐分析功能
-  - 分組、彙總
-
-- [ ] **Charts**
-  - 基本圖表類型（柱狀、折線、圓餅）
-  - Chart.js 或 D3 整合
-
-- [ ] **Print/PDF Export**
-  - 列印預覽
-  - PDF 生成
-
+- [ ] **Charts** (Chart.js integration)
+- [ ] **PDF Export**
 - [ ] **Plugin System**
-  - 擴充機制
-  - 自訂函數
-
-### Testing ✅
-
-- [x] **Fix WASM Loading in Node.js Tests** ✅ (2025-12-30)
-  - Fixed missing dependencies (papaparse, xlsx)
-  - Rebuilt WASM module with getMergedRanges
-  - Updated Vitest 4 config (poolOptions → singleFork)
-  - 121 unit tests + 131 integration tests passing
-
-- [x] **Fix Test Isolation and Mocking** ✅ (2026-01-04)
-  - Enabled `isolate: true` in `vite.config.ts` to prevent state leakage between tests.
-  - Refactored `merging.test.ts`, `RusheetAPI.test.ts`, and `filtering.test.ts` to use `vi.hoisted` for shared mock state.
-  - Resolved flaky integration tests caused by module caching.
-
----
-
-## Security & Authentication (Collaboration)
-
-### Authentication
-
-- [ ] **User Authentication**
-  - JWT token-based auth
-  - OAuth2 providers (Google, GitHub)
-  - Session management
-
-- [ ] **Workbook Permissions**
-  - Owner, Editor, Viewer roles
-  - Per-workbook access control
-  - Public/private workbooks
-
-- [ ] **Share Links**
-  - Generate shareable URLs
-  - Link expiration
-  - Password protection
-
-### Security
-
-- [ ] **Rate Limiting**
-  - API rate limits
-  - WebSocket connection limits
-
-- [ ] **Input Sanitization**
-  - Prevent XSS in cell content
-  - Formula injection protection
-
-- [ ] **Audit Logging**
-  - Track changes per user
-  - Access logs
-
----
-
-## Accessibility & i18n
-
-### Accessibility (a11y)
-
-- [ ] **Keyboard Navigation**
-  - Full keyboard support documented
-  - Focus indicators
-  - Skip links
-
-- [ ] **Screen Reader Support**
-  - ARIA labels
-  - Live regions for updates
-  - Accessible grid pattern
-
-- [ ] **High Contrast Mode**
-  - Support system preferences
-  - Custom high contrast theme
-
-### Internationalization (i18n)
-
-- [ ] **Locale Support**
-  - Number formatting (decimal separator)
-  - Date formatting
-  - Currency formatting
-
-- [ ] **RTL Support**
-  - Right-to-left text direction
-  - Mirrored UI
-
-- [ ] **Translation Framework**
-  - Externalized strings
-  - Translation files
-
----
-
-## Developer Experience
-
-### Tooling
-
-- [ ] **CI/CD Pipeline Improvements**
-  - Automated releases
-  - npm/crates.io publishing
-  - Changelog generation
-
-- [ ] **Pre-commit Hooks**
-  - Lint on commit
-  - Format on commit
-  - Type check
-
-### Documentation Site (VitePress) ✅
-
-- [x] API reference
-- [x] Getting started guide
-- [x] Architecture overview
-- [ ] More examples and tutorials
-- [ ] Versioned docs
-
----
-
-## Testing
-
-### Current Test Coverage ✅
-
-| Type | Count | Status |
-|------|-------|--------|
-| Rust Tests | 422 | ✅ 100% passing |
-| TS Unit Tests | 141 | ✅ Passing |
-| TS Integration | 132 | ✅ Passing |
-| E2E (Playwright) | 2 files | ✅ Running |
-
-### WASM Loading in Node.js Environment ✅ RESOLVED
-
-**Status:** 🟢 Fixed (2025-12-30)
-
-**Resolution:**
-The issue was not actually with WASM loading mechanism, but with:
-1. Missing npm dependencies (`papaparse`, `xlsx`) not installed
-2. WASM module needed rebuild to include new `getMergedRanges` function
-3. Vitest 4 config deprecation (`poolOptions` → top-level `singleFork`)
-
-**Working Setup (in `src/__tests__/setup.ts`):**
-- Custom `fetch()` override loads WASM from filesystem
-- `WebAssembly.instantiateStreaming` disabled to force fallback path
-- Canvas 2D context mock for Node.js environment
-
----
-
-## Completed Phases (Historical)
-
-### Phase 0: Test Infrastructure ✅
-- Vitest browser mode configured
-- CI pipeline with GitHub Actions
-- 20 unit tests passing
-
-### Phase 1: Core Data Structure Refactor ✅
-- 64x64 Morton-indexed chunks with bitvec
-- All 251 Rust tests pass
-
-### Phase 2: Zero-Copy Data Bridge ✅
-- ViewportBuffer with pointer accessors
-- `getViewportArrays()` API in TypeScript
-
-### Phase 3: Offscreen Rendering ✅
-- Web Worker with OffscreenCanvas
-- RenderController implements IGridRenderer
-
-### Phase 4: Formula Engine Hardening ✅
-- Nom-based parser with 53 tests
-- 24 built-in functions (SUM, IF, CONCATENATE, etc.)
-
-### Phase 5: Event System & Row/Col Operations ✅
-- Complete event/callback system
-- Row/column insert/delete with undo/redo
-
-### Phase 6: Collaboration Server ✅
-- rusheet-server crate with Axum
-- Real-time sync with Yjs/yrs
-- PostgreSQL persistence
-- DevContainer setup
-
----
-
-## API Inventory
-
-### Currently Implemented ✅
-
-**Cell Operations:**
-- `setCellValue(row, col, value)`
-- `getCellData(row, col)`
-- `clearRange(startRow, startCol, endRow, endCol)`
-
-**Formatting:**
-- `setCellFormat(row, col, format)`
-- `setRangeFormat(startRow, startCol, endRow, endCol, format)`
-
-**Sheets:**
-- `addSheet(name)`, `deleteSheet(index)`, `renameSheet(index, name)`
-- `setActiveSheet(index)`, `getSheetNames()`
-
-**Viewport:**
-- `getViewportData()`, `populateViewport()`
-- Zero-copy pointer accessors
-
-**History:**
-- `undo()`, `redo()`, `canUndo()`, `canRedo()`
-
-**Serialization:**
-- `serialize()`, `deserialize(json)`
-
-**Row/Column Operations:** ✅
-- `insertRows(atRow, count)`, `deleteRows(atRow, count)`
-- `insertCols(atCol, count)`, `deleteCols(atCol, count)`
-
-**Events:** ✅
-- `onChange`, `onSelectionChange`, `onCellEdit`
-- `onFormatChange`, `onSheetAdd/Delete/Rename`, `onActiveSheetChange`
-- `onUndo`, `onRedo`
-- `onRowsInsert`, `onRowsDelete`, `onColsInsert`, `onColsDelete`
-- `onSortRange`, `onFilterChange`
-
-**Import/Export:** ✅ (2025-12-30)
-- CSV: `exportCSV()`, `importCSV()`, `downloadCSV()`, `importCSVFile()`
-- XLSX: `exportXLSX()`, `importXLSX()`, `downloadXLSX()`, `importXLSXFile()`, `getXLSXSheetNames()`
-
-**Sorting:** ✅ (2025-12-30)
-- `sortRange(startRow, endRow, startCol, endCol, sortCol, ascending)`
-
-**Cell Merging:** ✅ (2025-12-30)
-- `mergeCells(startRow, startCol, endRow, endCol)`
-- `unmergeCells(row, col)`
-- `getMergedRanges()`, `getMergeInfo(row, col)`, `isMergedSlave(row, col)`
-
-**Filtering:** ✅ (2025-12-31)
-- `getUniqueValuesInColumn(col, maxRows?)`
-- `applyColumnFilter(col, visibleValues, maxRows?)`
-- `clearColumnFilter(col)`, `clearAllFilters()`
-- `getActiveFilters()`, `isRowHidden(row)`
-- `onFilterChange` event
-
-**Collaboration Server API:** ✅
-- `GET/POST /api/workbooks` - List/create workbooks
-- `GET/PUT/DELETE /api/workbooks/{id}` - Workbook CRUD
-- `GET/PUT /api/workbooks/{id}/content` - Content storage
-- `WS /ws/{workbook_id}` - Real-time collaboration
-
-### Missing (See Priority Queue Above)
-
-- CSV/XLSX import/export
-- Advanced formula functions
-- Headless API
-- Vue component wrapper
 
 ---
 
@@ -557,10 +200,4 @@ Frontend
   ├── rusheet-wasm (via pkg/)
   ├── yjs + y-websocket (collaboration)
   └── Canvas rendering
-```
-
-### Testing Principles
-1. Test behavior, not implementation
-2. Use real components in integration tests
-3. Verify complete data flow (input → WASM → render → state)
-4. Specification tests before implementation
+```\n## Documentation Debt (New)\n\n- [ ] **Server API Specification**: Detailed Swagger/OpenAPI spec for `rusheet-server` endpoints.\n- [ ] **Collaboration Protocol**: Sequence diagram explaining the Yjs sync flow (Client <-> Server <-> DB).\n- [ ] **Custom Function Guide**: How to add new functions to `rusheet-formula`.

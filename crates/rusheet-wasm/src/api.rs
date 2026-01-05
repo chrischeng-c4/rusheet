@@ -853,8 +853,8 @@ impl SpreadsheetEngine {
         let sheet = self.workbook.active_sheet();
         
         // Use a reasonable limit for scrollable area for now
-        let max_rows = 2000;
-        let max_cols = 100;
+        let max_rows = 1000;
+        let max_cols = 26;
         
         let width = sheet.col_x_position(max_cols);
         let height = sheet.row_y_position(max_rows);
